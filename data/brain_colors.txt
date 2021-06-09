@@ -1,0 +1,54 @@
+celltype	ct.name	hex
+ast_tf	astrocytes	#A8CEE1
+ex_tf	excitatory neurons	#BDE29C
+inh_tf	inhibitory neurons	#389D34
+in_tf	inhibitory neurons	#389D34
+mic_tf	microglia	#F89C9B
+oli_tf	oligodendrocytes	#E01F25
+opc_tf	oligodendrocyte progenitor cells	#FBBC74
+eap_tf	pericytes / endothelial cells	#FD7C21
+ast	astrocytes	#A8CEE1
+ex	excitatory neurons	#BDE29C
+inh	inhibitory neurons	#389D34
+in	inhibitory neurons	#389D34
+in.	inhibitory neurons	#389D34
+mic	microglia	#F89C9B
+oli	oligodendrocytes	#E01F25
+opc	oligodendrocyte progenitor cells	#FBBC74
+eap	pericytes / endothelial cells	#FD7C21
+bulk	brain tissue	#DDDDDD
+total	cell-type combined	#FFCC00
+merged	cell-type combined	#FFCC00
+ast_glial	astrocytes in glial	#A8CEE1
+mic_glial	microglia in glial	#F89C9B
+oli_glial	oligodendrocytes in glial	#E01F25
+ex_neuronal	excitatory in neuronal	#BDE29C
+in_neuronal	inhibitory in neuronal	#389D34
+glial	glial cells	#FFFF00
+neuronal	neuronal cells	#009900
+Ast	astrocytes	#A8CEE1
+Astro	astrocytes	#A8CEE1
+Ex	excitatory neurons	#BDE29C
+Inh	inhibitory neurons	#389D34
+In	inhibitory neurons	#389D34
+Mic	microglia	#F89C9B
+Microglia	microglia	#F89C9B
+Oligo	oligodendrocytes	#E01F25
+Oli	oligodendrocytes	#E01F25
+Opc	oligodendrocyte progenitor cells	#FBBC74
+OPC	oligodendrocyte progenitor cells	#FBBC74
+Vasc	vasculature	#FD7C21
+Per	pericytes / endothelial cells	#43A2CA
+Eap	pericytes / endothelial cells	#FD7C21
+End	endothelial cells	#FD7C21
+Endo	endothelial cells	#FD7C21
+Fib	fibroblast	#756BB1
+SMC	smooth muscle	#FC9272
+Ex-L2or3	excitatory neurons (L2/3)	#d01c8b
+Ex-L4	excitatory neurons (L4)	#f1b6da
+Ex-L5or6	excitatory neurons (L5/6)	#b8e186
+Ex-L5or6-CC	excitatory neurons (L5/6,CC)	#4dac26
+In-PV	inhibitory neurons (PV)	#ffffcc
+In-SST	inhibitory neurons (SST)	#a1dab4
+In-SV2C	inhibitory neurons (SV2C)	#41b6c4
+In-VIP	inhibitory neurons (VIP)	#225ea8
