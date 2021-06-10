@@ -1,140 +1,212 @@
 library(data.table)
 library(tidyverse)
 
-assoc.file <- "result/step7/phenotype_association.txt.gz"
+read.assoc <- function(poly.file, .glm.fun, .term) {
 
-pheno.file <- "data/rosmap_phenotype.csv.gz"
+    require(data.table)
+    require(tidyverse)
 
-pheno.dt <-
-    fread(pheno.file, na.strings = "-9") %>%
-    mutate(iid = as.integer(projid)) %>% 
-    filter(!is.na(iid)) %>% 
-    select(iid, pathoAD, apoe_genotype, np_sqrt, nft_sqrt, cogn_ep_random_slope, educ, msex, age_death)
+    pheno.file <- "data/rosmap_phenotype.csv.gz"
 
-pheno.melt <- melt(pheno.dt, id.vars = "iid")
+    pheno.dt <-
+        fread(pheno.file, na.strings = "-9") %>%
+        mutate(iid = as.integer(projid)) %>%
+        filter(!is.na(iid)) %>%
+        mutate(apoe.e4 = if_else(str_ends(apoe_genotype, "4"), 1, 0)) %>%
+        select(-apoe_genotype) %>%
+        select(iid, pathoAD, apoe.e4, np_sqrt, nft_sqrt,
+               cogn_ep_random_slope, educ, msex, age_death)
+
+    print(poly.file)
+
+    poly.dt <- fread(poly.file)
+
+    .post.inter <- function(.glm) {
+        ret <-
+            summary(.glm) %>%
+            coefficients %>%
+            as.data.frame
+
+        ret <- ret %>%
+            mutate(term = rownames(ret)) %>%
+            filter(term == .term) %>%
+            select(Estimate, `Std. Error`) %>%
+            as.list
+    }
+
+    .fun <- function(.dt){
+        .lm.dt <- .dt[, .(iid, yhat)] %>%
+            left_join(pheno.dt, by = "iid")
+        .glm.fun(.lm.dt) %>% .post.inter
+    }
+
+    .ret <- poly.dt[!is.na(yhat), .fun(.SD),
+                    by = .(hgnc_symbol, celltype)]
+}
+
+fit.ashr <- function(.dt) {
+    .beta <- .dt$`Estimate`
+    .se <- .dt$`Std. Error`
+    .ash <- ashr::ash(.beta, .se)
+    list(.ash$result$lfsr, .ash$result$svalue,
+         .ash$result$lfdr, .ash$result$qvalue)
+}
+
+#############################
+## testing singleton terms ##
+#############################
+
+.np.fun <- function(.lm.dt) {
+    lm(np_sqrt ~ apoe.e4 + yhat, data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_np_twas.txt.gz"
 
 if(!file.exists(assoc.file)) {
 
-    read.assoc <- function(poly.file) {
+    clust <- parallel::makeCluster(12)
 
-        poly.dt <- fread(poly.file)
-        
-        .xx <- poly.dt %>%
-            dcast(iid ~ hgnc_symbol + ensembl_gene_id + celltype, value.var = "yhat") %>%
-            mutate(iid = as.integer(iid)) %>%
-            as.data.table
-        
-        .yy <- .xx[, .(iid)] %>%
-            left_join(pheno.dt, by = "iid") %>%
-            mutate(apoe.e4 = if_else(str_ends(apoe_genotype, "4"), 1, 0)) %>% 
-            select(-apoe_genotype) %>% 
-            as.data.table
-        
-        x.mat <- as.matrix(as.data.frame(.xx)[, -1]) %>% scale
-        y.mat <- as.matrix(as.data.frame(.yy)[, -1]) %>% scale
-        
-        x.tib <- tibble(x = colnames(.xx)[-1]) %>%
-            mutate(x.col = 1:n()) %>%
-            separate(x, c("hgnc_symbol", "ensGene", "celltype"), sep="[_]")
-        
-        y.tib <- tibble(pheno = colnames(.yy)[-1]) %>%
-            mutate(y.col = 1:n())
-        
-        zqtl::calc.qtl.stat(x.mat, y.mat) %>%
-            left_join(x.tib) %>%
-            left_join(y.tib) %>%
-            as.data.table
-    }
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .np.fun,
+                                .term = "yhat")
 
-    assoc.dt <-
-        str_c("result/step7/chr", 1:22, "_poly.bed.gz") %>%
-        lapply(FUN = read.assoc) %>%
-        do.call(what=rbind) %>%
-        select(-x.col, -y.col)
+    out.dt <- do.call(rbind, .out)
 
-    fit.ashr <- function(.dt) {
-        .beta <- .dt$beta
-        .se <- .dt$se
-        .ash <- ashr::ash(.beta, .se)
-        list(.ash$result$lfsr, .ash$result$svalue,
-             .ash$result$lfdr, .ash$result$qvalue)
-    }
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
 
-    assoc.dt[,
-             c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
-             by = .(pheno)]
-
-    assoc.dt[, q.bh := p.adjust(p.val, "fdr"), by = .(pheno)]
-    
-    fwrite(assoc.dt, assoc.file, sep="\t", quote=FALSE)
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
 }
 
-gene.info <- fread("result/step1/gene.info.gz")
-col.info <- fread("data/brain_colors.txt")
+.nft.fun <- function(.lm.dt) {
+    lm(nft_sqrt ~ apoe.e4 + yhat, data = .lm.dt)
+}
 
-assoc.dt <- fread(assoc.file, sep="\t", header=TRUE) %>%
-    left_join(gene.info)
+assoc.file <- "result/step7/phenotype_nft_twas.txt.gz"
 
-.pheno <- "nft_sqrt"
+if(!file.exists(assoc.file)) {
 
-.dt <- assoc.dt[pheno == .pheno]
+    clust <- parallel::makeCluster(12)
 
-  
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .nft.fun,
+                                .term = "yhat")
 
-.df.show <-
-    .dt[order(.dt$p.val),
-        head(.SD, 5),
-        by = .(celltype)] %>%
-    filter(qvalue < .2) %>%
-    as.data.frame
+    out.dt <- do.call(rbind, .out)
 
-.col <- .df.show %>%
-    left_join(col.info) %>%
-    select(celltype, hex) %>%
-    unique %>% 
-    arrange(celltype)
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
 
-plt <-
-    ggplot(.dt, aes(x=transcript_start.hg19, y=-log10(p.val))) +
-    theme_bw() +
-    theme(axis.text.x = element_blank()) +
-    theme(legend.position = "none") +
-    facet_grid(.~ as.integer(chr), space="free", scales="free") +
-    geom_point(aes(colour = as.factor(as.integer(chr) %% 2)), stroke = 0, size = .5) +
-    scale_colour_brewer(guide=FALSE) +
-    geom_point(aes(fill=celltype), data = .df.show, stroke = .5, pch = 21) +
-    scale_fill_manual(values = .col$hex) +
-    ggrepel::geom_text_repel(aes(label = hgnc_symbol), data = .df.show, size=2)
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
 
-ggsave("temp.pdf", plt, width = 10, height = 2)
+.ad.fun <- function(.lm.dt) {
+    glm(pathoAD ~ apoe.e4 + yhat, family = "binomial", data = .lm.dt)
+}
 
-g <- 9
+assoc.file <- "result/step7/phenotype_ad_twas.txt.gz"
 
-.chr <- .df.show[g, c("chr")]
-.tss <- .df.show[g, c("transcript_start.hg19")]
-.tes <- .df.show[g, c("transcript_end.hg19")]
+if(!file.exists(assoc.file)) {
 
-.gene <- .df.show[g, "hgnc_symbol"]
-.qq <- str_c(.chr, ":", .tss, "-", .tes)
+    clust <- parallel::makeCluster(12)
 
-.file <- str_c("result/step7/chr", .chr, "_poly.bed.gz")
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .ad.fun,
+                                .term = "yhat")
 
-.poly <- fread(str_c("tabix -h ", .file, " ", .qq))
+    out.dt <- do.call(rbind, .out)
 
-.poly.pheno.dt <- .poly %>%
-    left_join(pheno.melt[variable==.pheno]) %>%
-    group_by(celltype) %>%
-    mutate(yhat = scale(yhat)) %>% 
-    mutate(yobs = scale(value)) %>% 
-    ungroup
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
 
-ggplot(.poly.pheno.dt, aes(x = yhat, y = yobs)) +
-    xlab(.gene) +
-    ylab(.pheno) +
-    theme_bw() +
-    facet_wrap(~celltype, scales="free") +
-    geom_point(stroke = 0, colour = "gray30") +
-    geom_density2d(colour="green", size=.2) +
-    geom_smooth(method = "lm", se=FALSE, size = .5, colour = "red")  +
-    ggpubr::stat_cor()
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
 
+###############################
+## testing interaction terms ##
+###############################
+
+.np.inter.fun <- function(.lm.dt) {
+    lm(np_sqrt ~ apoe.e4 + apoe.e4:yhat + yhat, data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_np_interaction.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .np.inter.fun,
+                                .term = "apoe.e4:yhat")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
+
+.nft.inter.fun <- function(.lm.dt) {
+    lm(nft_sqrt ~ apoe.e4 + apoe.e4:yhat + yhat, data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_nft_interaction.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .nft.inter.fun,
+                                .term = "apoe.e4:yhat")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
+
+.ad.inter.fun <- function(.lm.dt) {
+    glm(pathoAD ~ apoe.e4 + apoe.e4:yhat + yhat,
+        family = "binomial", data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_ad_interaction.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .ad.inter.fun,
+                                .term = "apoe.e4:yhat")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}

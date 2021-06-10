@@ -408,8 +408,12 @@ result/step8/%.bed.gz.tbi: result/step8/%.bed.gz
 # Interpretation of GWAS #
 ##########################
 
+GWAS := $(shell ls -1 result/step8/*.bed.gz | xargs -I file basename file .bed.gz)
+TT := obs.stat null.stat obs.pve null.pve
+
 step9: $(foreach gwas, $(GWAS), jobs/step9/interpretation_$(gwas).jobs.gz)
 step9_long: $(foreach gwas, $(GWAS), jobs/step9/interpretation_$(gwas).long.gz)
+step9_post: $(foreach gwas, $(GWAS), $(foreach tt, $(TT), result/step9/$(gwas).$(tt).gz))
 
 jobs/step9/interpretation_%.jobs.gz: 
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -420,3 +424,19 @@ jobs/step9/interpretation_%.jobs.gz:
 jobs/step9/%.long.gz: jobs/step9/%.jobs.gz
 	gzip -cd $< | awk 'system(" ! [ -f " $$NF ".stat.gz ]") == 0' | gzip > $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=8g -l h_rt=4:00:00 -b y -j y -N STEP9_$* -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
+
+result/step9/%.obs.stat.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd result/step9/obs/$*/*.stat.gz | awk 'NR == 1 || $$1 != "gwas"' | gzip -c > $@
+
+result/step9/%.null.stat.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd result/step9/null/$*/*.stat.gz | awk 'NR == 1 || $$1 != "gwas"' | gzip -c > $@
+
+result/step9/%.obs.pve.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd result/step9/obs/$*/*.pve.gz | awk 'NR == 1 || $$1 != "celltype"' | gzip -c > $@
+
+result/step9/%.null.pve.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	gzip -cd result/step9/null/$*/*.pve.gz | awk 'NR == 1 || $$1 != "celltype"' | gzip -c > $@
