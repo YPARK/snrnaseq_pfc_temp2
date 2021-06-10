@@ -52,6 +52,85 @@ fit.ashr <- function(.dt) {
          .ash$result$lfdr, .ash$result$qvalue)
 }
 
+###################################################
+## testing singleton terms without APOE genotype ##
+###################################################
+
+.np.fun0 <- function(.lm.dt) {
+    lm(np_sqrt ~ yhat, data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_np_twas_unc.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .np.fun0,
+                                .term = "yhat")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
+
+.nft.fun0 <- function(.lm.dt) {
+    lm(nft_sqrt ~ yhat, data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_nft_twas_unc.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .nft.fun0,
+                                .term = "yhat")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
+
+.ad.fun0 <- function(.lm.dt) {
+    glm(pathoAD ~ yhat, family = "binomial", data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_ad_twas_unc.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .ad.fun0,
+                                .term = "yhat")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
+
 #############################
 ## testing singleton terms ##
 #############################
