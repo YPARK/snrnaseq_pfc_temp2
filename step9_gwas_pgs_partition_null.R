@@ -52,15 +52,25 @@ take.ld.data <- function(ld.idx) {
     .eqtl.dt <- fread("tabix -h " %&% .eqtl.file %&% " " %&% qq)
 
     .dt <- left_join(.eqtl.dt, .gwas.dt) %>% 
-        as.data.table %>% 
-        dcast(iid + gwas.tot + gwas.hat ~ hgnc_symbol + celltype,
-              value.var = "yhat",
-              fun.aggregate = mean) %>%
+        as.data.table
+
+    if(nrow(.dt) < 1) return(NULL)
+
+    dcast(.dt, iid + gwas.tot + gwas.hat ~ hgnc_symbol + celltype,
+          value.var = "yhat",
+          fun.aggregate = mean) %>%
         select(-iid) %>%
         as.data.table
 }
 
 .data <- take.ld.data(LD.IDX)
+
+if(is.null(.data)) {
+    log.msg("Empty data")
+    write_tsv(data.frame(), out.stat.file)
+    write_tsv(data.frame(), out.pve.file)
+    q()
+}
 
 y <- .data %>% select(gwas.hat) %>% as.matrix %>% scale
 x <- .data %>% select(-gwas.tot, -gwas.hat) %>% as.matrix %>% scale
