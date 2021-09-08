@@ -417,8 +417,8 @@ step9_post: $(foreach gwas, $(GWAS), $(foreach tt, $(TT), result/step9/$(gwas).$
 
 jobs/step9/interpretation_%.jobs.gz: 
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	awk -vLDFILE=$(LDFILE) -vGWAS="result/step8/$*.bed.gz" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_partition.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s result/step9/obs/$*/%04d\n", EXE, LDFILE, j, GWAS, EQTL, j }' | gzip -c > $@
-	awk -vLDFILE=$(LDFILE) -vGWAS="result/step8/$*.bed.gz" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_partition_null.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s result/step9/null/$*/%04d\n", EXE, LDFILE, j, GWAS, EQTL, j }' | gzip -c >> $@
+	awk -vLDFILE=$(LDFILE) -vGWAS="result/step8/$*.bed.gz" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s result/step9/obs/$*/%04d\n", EXE, LDFILE, j, GWAS, EQTL, j }' | gzip -c > $@
+	awk -vLDFILE=$(LDFILE) -vGWAS="result/step8/$*.bed.gz" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_null.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s result/step9/null/$*/%04d\n", EXE, LDFILE, j, GWAS, EQTL, j }' | gzip -c >> $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
 jobs/step9/%.long.gz: jobs/step9/%.jobs.gz
