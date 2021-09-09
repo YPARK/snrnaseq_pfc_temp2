@@ -386,9 +386,11 @@ GWAS := $(shell ls -1 data/GWAS/*.bed.gz | xargs -I file basename file .bed.gz)
 LDFILE := LD.info.txt
 NLD := $(shell tail -n+2 $(LDFILE) | wc -l | awk '{ print $$1 }')
 
-step8: $(foreach gwas, $(GWAS), jobs/step8/gwas_$(gwas).jobs.gz)
+step8: $(foreach gwas, $(GWAS), jobs/step8/subset_$(gwas).jobs.gz) # jobs/step8/gwas_$(gwas).jobs.gz 
 
 step8_post: $(foreach gwas, $(GWAS), $(foreach et, $(EXT), result/step8/$(gwas).$(et)))
+
+# (a) just take PGS
 
 jobs/step8/gwas_%.jobs.gz: data/GWAS/%.bed.gz 
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -403,6 +405,15 @@ result/step8/%.bed.gz:
 result/step8/%.bed.gz.tbi: result/step8/%.bed.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	tabix -p bed $<
+
+# (b) take PGS by subsets
+
+jobs/step8/subset_%.jobs.gz: data/GWAS/%.bed.gz 
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mkdir -p result/step8/$*/
+	awk -vLDFILE=$(LDFILE) -vDATA="data/GWAS/$*.bed.gz" -vGENO="data/rosmap_geno/" -vEQTL="result/step7/" -vTEMP="$(TEMPDIR)/gwas/$*" -vN=$(NLD) -vEXE=step8_gwas_pgs_subset.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s %s result/step8/subset/$*/%04d.bed.gz\n", EXE, LDFILE, j, DATA, GENO, EQTL, (TEMP "_" j), j }' | gzip -c > $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=4g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
+
 
 ##########################
 # Interpretation of GWAS #
