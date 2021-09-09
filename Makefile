@@ -388,7 +388,7 @@ NLD := $(shell tail -n+2 $(LDFILE) | wc -l | awk '{ print $$1 }')
 
 step8: $(foreach gwas, $(GWAS), jobs/step8/subset_$(gwas).jobs.gz) # jobs/step8/gwas_$(gwas).jobs.gz 
 
-step8_post: $(foreach gwas, $(GWAS), $(foreach et, $(EXT), result/step8/$(gwas).$(et)))
+step8_post: $(foreach gwas, $(GWAS), $(foreach et, $(EXT), result/step8/subset/$(gwas).$(et)))
 
 # (a) just take PGS
 
