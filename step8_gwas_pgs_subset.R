@@ -20,6 +20,8 @@ EQTL.DIR  <- argv[5]
 TEMP.DIR  <- argv[6]
 OUT.FILE  <- argv[7]
 
+if(file.exists(OUT.FILE)) q()
+
 ## Take PGS vectors induced by a subset of eQTL loci
 
 source("Util-geno.R")
