@@ -170,9 +170,9 @@ take.prs.celltype <- function(ld.idx, window.size, lodds.cutoff) {
 
 out.dt <- data.table()
 
-for(w in c(1000, 1e5)) {
+for(w in c(1000, 1e4, 1e5)) {
     for(lo in c(0, log(.9/.1))){
-        .dt <- take.prs.celltype(LD.IDX, w = 100, lo = 0)
+        .dt <- take.prs.celltype(LD.IDX, w, lo)
         if(!is.null(.dt)){
             .dt[, l10.window := log10(w)]
             .dt[, lodds.cutoff := lo]
