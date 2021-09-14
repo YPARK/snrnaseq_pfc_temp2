@@ -390,7 +390,11 @@ step8: $(foreach gwas, $(GWAS), jobs/step8/subset_$(gwas).jobs.gz)
 
 step8_long: $(foreach gwas, $(GWAS), jobs/step8/subset_$(gwas).long.gz)
 
-step8_post: $(foreach gwas, $(GWAS), $(foreach et, $(EXT), result/step8/subset/$(gwas).$(et)))
+step8_combine: $(foreach gwas, $(GWAS), docs/share/pgs/$(gwas).txt.gz)     
+
+docs/share/pgs/%.txt.gz:                                                   
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)                                 
+	gzip -cd result/step8/subset/$*/*.bed.gz | awk '!/#CHR/{ k = $$7 FS $$8 FS $$9 FS $$5; data[k] += $$6 } END { for(k in data) print k FS data[k] }' | gzip -c > $@
 
 jobs/step8/subset_%.jobs.gz: data/GWAS/%.bed.gz 
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
