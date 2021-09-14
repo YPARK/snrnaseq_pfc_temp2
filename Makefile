@@ -408,35 +408,43 @@ jobs/step8/%.long.gz: jobs/step8/%.jobs.gz
 # Interpretation of GWAS #
 ##########################
 
-GWAS := $(shell ls -1 result/step8/*.bed.gz | xargs -I file basename file .bed.gz)
+GWAS := $(shell ls -1 data/GWAS/*.bed.gz | xargs -I file basename file .bed.gz)
 TT := obs.stat null.stat obs.pve null.pve
 
-step9: $(foreach gwas, $(GWAS), jobs/step9/interpretation_$(gwas).jobs.gz)
-step9_long: $(foreach gwas, $(GWAS), jobs/step9/interpretation_$(gwas).long.gz)
+step9: $(foreach tt, joint celltype, $(foreach gwas, $(GWAS), jobs/step9/$(tt)_$(gwas).jobs.gz))
+
+step9_long: $(foreach tt, joint celltype, $(foreach gwas, $(GWAS), jobs/step9/$(tt)_$(gwas).long.gz))
+
 step9_post: $(foreach gwas, $(GWAS), $(foreach tt, $(TT), result/step9/$(gwas).$(tt).gz))
 
-jobs/step9/interpretation_%.jobs.gz: 
+jobs/step9/joint_%.jobs.gz: 
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	awk -vLDFILE=$(LDFILE) -vGWAS="result/step8/$*.bed.gz" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s result/step9/obs/$*/%04d\n", EXE, LDFILE, j, GWAS, EQTL, j }' | gzip -c > $@
-	awk -vLDFILE=$(LDFILE) -vGWAS="result/step8/$*.bed.gz" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_null.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s result/step9/null/$*/%04d\n", EXE, LDFILE, j, GWAS, EQTL, j }' | gzip -c >> $@
+	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
+	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
+
+jobs/step9/celltype_%.jobs.gz: 
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_celltype.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/celltype/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
+	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_celltype.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/celltype/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=2:00:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
 jobs/step9/%.long.gz: jobs/step9/%.jobs.gz
 	gzip -cd $< | awk 'system(" ! [ -f " $$NF ".stat.gz ]") == 0' | gzip > $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=8g -l h_rt=4:00:00 -b y -j y -N STEP9_$* -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
 
-result/step9/%.obs.stat.gz:
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	gzip -cd result/step9/obs/$*/*.stat.gz | awk 'NR == 1 || $$1 != "gwas"' | gzip -c > $@
+# result/step9/%.obs.stat.gz:
+# 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+# 	gzip -cd result/step9/obs/$*/*.stat.gz | awk 'NR == 1 || $$1 != "gwas"' | gzip -c > $@
 
-result/step9/%.null.stat.gz:
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	gzip -cd result/step9/null/$*/*.stat.gz | awk 'NR == 1 || $$1 != "gwas"' | gzip -c > $@
+# result/step9/%.null.stat.gz:
+# 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+# 	gzip -cd result/step9/null/$*/*.stat.gz | awk 'NR == 1 || $$1 != "gwas"' | gzip -c > $@
 
-result/step9/%.obs.pve.gz:
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	gzip -cd result/step9/obs/$*/*.pve.gz | awk 'NR == 1 || $$1 != "celltype"' | gzip -c > $@
+# result/step9/%.obs.pve.gz:
+# 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+# 	gzip -cd result/step9/obs/$*/*.pve.gz | awk 'NR == 1 || $$1 != "celltype"' | gzip -c > $@
 
-result/step9/%.null.pve.gz:
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	gzip -cd result/step9/null/$*/*.pve.gz | awk 'NR == 1 || $$1 != "celltype"' | gzip -c > $@
+# result/step9/%.null.pve.gz:
+# 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+# 	gzip -cd result/step9/null/$*/*.pve.gz | awk 'NR == 1 || $$1 != "celltype"' | gzip -c > $@

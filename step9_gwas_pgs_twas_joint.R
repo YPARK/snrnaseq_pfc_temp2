@@ -1,20 +1,27 @@
 #!/usr/bin/env Rscript
 
-## LD.FILE <- "LD.info.txt"
-## LD.IDX <- 1
-## GWAS.FILE <- "result/step8/ctg_ad.bed.gz"
-## EQTL.DIR <- "result/step7"
-## OUT.HDR <- "TEMP"
+LD.FILE <- "LD.info.txt"
+LD.IDX <- 1
+GWAS.NAME <- "ctg_ad"
+GWAS.DIR <- "result/step8/subset"
+EQTL.DIR <- "result/step7"
+OUT.HDR <- "TEMP"
+DO.PERMUTE <- FALSE
 
 argv <- commandArgs(trailingOnly = TRUE)
 
-if(length(argv) != 5) q()
+if(length(argv) < 6) q()
 
 LD.FILE <- argv[1]
 LD.IDX <- as.integer(argv[2])
-GWAS.FILE <- argv[3]
-EQTL.DIR <- argv[4]
-OUT.HDR <- argv[5]
+GWAS.NAME <- argv[3]
+GWAS.DIR <- argv[4]
+EQTL.DIR <- argv[5]
+OUT.HDR <- argv[6]
+
+if(length(argv) > 6){
+    DO.PERMUTE <- as.logical(argv[7])
+}
 
 source("Util-geno.R")
 
@@ -38,32 +45,34 @@ ld.tab <- fread(LD.FILE) %>%
     mutate(ld = 1:n()) %>%
     as.data.frame
 
-take.ld.data <- function(ld.idx) {
+take.twas.data <- function(ld.idx) {
     qq <- ld.tab[ld.idx, "qq"]
     .chr <- ld.tab[ld.idx, "#CHR"]
     .lb <- ld.tab[ld.idx, "start"]
     .ub <- ld.tab[ld.idx, "stop"]
 
+    .gwas.file <- sprintf("%s/%s/%04d.bed.gz", GWAS.DIR, GWAS.NAME, ld.idx)
     .eqtl.file <- EQTL.DIR %&% "/chr" %&% .chr %&% "_poly.bed.gz"
-
-    .gwas.dt <- fread("tabix -h " %&% GWAS.FILE %&% " " %&% qq) %>%
-        rename(gwas.hat = y.hat, gwas.tot = y.tot)
-
+    .gwas.dt <- fread("tabix -h " %&% .gwas.file %&% " " %&% qq)
     .eqtl.dt <- fread("tabix -h " %&% .eqtl.file %&% " " %&% qq)
 
-    .dt <- left_join(.eqtl.dt, .gwas.dt) %>% 
-        as.data.table
+    .eqtl.dt <- .eqtl.dt[, head(.SD, 1), by = .(iid, hgnc_symbol, celltype)]
 
-    if(nrow(.dt) < 1) return(NULL)
-
-    dcast(.dt, iid + gwas.tot + gwas.hat ~ hgnc_symbol + celltype,
-          value.var = "yhat",
-          fun.aggregate = mean) %>%
+    ## Ignoring cell type in the total PGS
+    .tot <- .gwas.dt[celltype == "tot", .(iid, y)] %>%
+        rename(gwas.tot = y) %>% 
+        unique() %>% 
+        left_join(.eqtl.dt)
+    
+    if(nrow(.tot) < 1) return(NULL)
+    
+    dcast(.tot, iid + gwas.tot ~ hgnc_symbol + celltype,
+          value.var = "yhat", fun.aggregate = mean) %>%
         select(-iid) %>%
         as.data.table
 }
 
-.data <- take.ld.data(LD.IDX)
+.data <- take.twas.data(LD.IDX)
 
 if(is.null(.data)) {
     log.msg("Empty data")
@@ -72,17 +81,17 @@ if(is.null(.data)) {
     q()
 }
 
-y <- .data %>% select(gwas.hat) %>% as.matrix %>% scale
-x <- .data %>% select(-gwas.tot, -gwas.hat) %>% as.matrix %>% scale
+y <- .data %>% select(gwas.tot) %>% as.matrix %>% scale
+x <- .data %>% select(-gwas.tot) %>% as.matrix %>% scale
 
-y <- apply(y, 2, function(.y) sample(.y))
-x <- apply(x, 2, function(.x) sample(.x))
+if(DO.PERMUTE){
+    y <- apply(y, 2, function(.y) sample(.y))
+    x <- apply(x, 2, function(.x) sample(.x))
+}
 
-gwas.name <- str_remove(basename(GWAS.FILE), ".bed.gz")
+y.dt <- data.table(gwas = GWAS.NAME, y.col = 1)
 
-y.dt <- data.table(gwas = gwas.name, y.col = 1)
-
-x.dt <- data.table(xx = unlist(colnames(.data)[-(1:2)])) %>%
+x.dt <- data.table(xx = unlist(colnames(.data)[-1])) %>%
     mutate(x.col = 1:n()) %>%
     separate(xx, c("hgnc_symbol", "celltype"), sep="[_]") %>% 
     as.data.table
@@ -107,7 +116,6 @@ out.dt <-
 .var <- function(...) var(unlist(...), na.rm=TRUE)
 
 vtot <- .var(.data$`gwas.tot`)
-vtot.hat <- .var(.data$`gwas.hat`)
 
 .pve <- function(.dt, x, y) {
     .x <- x[, .dt$x.col, drop = FALSE]
@@ -124,16 +132,24 @@ vtot.hat <- .var(.data$`gwas.hat`)
     list(.var(.hat) / .var(.y))
 }
 
-pve.df <-
-    out.dt[,
-           .(pve = .pve(.SD, x, y),
-             pve.uni = .pve.uni(.SD, x, y),
-             ngene = .N),
-           by = .(celltype)] %>%
-    mutate(vtot, vtot.hat) %>%
-    mutate(pve = unlist(pve)) %>% 
-    mutate(pve.uni = unlist(pve.uni)) %>% 
-    as_tibble
+lodds.cutoff <- 0
+
+if(nrow(out.dt[lodds > lodds.cutoff]) > 0) {
+
+    pve.df <-
+        out.dt[lodds > lodds.cutoff,
+               .(pve = .pve(.SD, x, y),
+                 pve.uni = .pve.uni(.SD, x, y),
+                 ngene = .N),
+               by = .(celltype)] %>%
+        mutate(vtot) %>%
+        mutate(pve = unlist(pve)) %>% 
+        mutate(pve.uni = unlist(pve.uni)) %>% 
+        as_tibble
+
+} else {
+    pve.df <- data.frame()
+}
 
 out.df <-
     out.dt[, .(gwas, celltype, hgnc_symbol,
