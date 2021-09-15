@@ -376,7 +376,7 @@ result/step7/chr%_poly.bed.gz:
 	find result/step7/eqtl -name '*poly.bed.gz' -type f -exec gzip -cd {} + | awk 'NR == 1 { print $$0 } (NR > 1 && $$1 == $*) { printf("%d\t%d\t%d", $$1, $$2, $$3); for(j=4; j<=NF; ++j) printf "\t" $$j; printf "\n"; }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
 
 result/step7/gene_pve.bed.gz:
-	find result/step7/eqtl -name '*poly.bed.gz' -type f -exec gzip -cd {} + | awk -F'\t' '{ k=$$1 FS $$2 FS $$3 FS $$5 FS $$6; if(!(k in data)) data[k] = $$9 FS $$11 FS $$12  } END { for(k in data) print k FS data[k] }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
+	find result/step7/eqtl -name '*poly.bed.gz' -type f -exec gzip -cd {} + | awk -F'\t' '{ k=$$1 FS $$2 FS $$3 FS $$5 FS $$6; if(!(k in data)) data[k] = $$9 FS $$10  } END { for(k in data) print k FS data[k] }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
 
 #########################
 # GWAS polygenic scores #
