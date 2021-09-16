@@ -57,7 +57,7 @@ fit.ashr <- function(.dt) {
 ###################################################
 
 .np.fun0 <- function(.lm.dt) {
-    lm(np_sqrt ~ yhat, data = .lm.dt)
+    lm(yhat ~ np_sqrt, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_np_twas_unc.txt.gz"
@@ -70,7 +70,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .np.fun0,
-                                .term = "yhat")
+                                .term = "np_sqrt")
 
     out.dt <- do.call(rbind, .out)
 
@@ -82,7 +82,7 @@ if(!file.exists(assoc.file)) {
 }
 
 .nft.fun0 <- function(.lm.dt) {
-    lm(nft_sqrt ~ yhat, data = .lm.dt)
+    lm(yhat ~ nft_sqrt, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_nft_twas_unc.txt.gz"
@@ -95,7 +95,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .nft.fun0,
-                                .term = "yhat")
+                                .term = "nft_sqrt")
 
     out.dt <- do.call(rbind, .out)
 
@@ -107,7 +107,7 @@ if(!file.exists(assoc.file)) {
 }
 
 .ad.fun0 <- function(.lm.dt) {
-    glm(pathoAD ~ yhat, family = "binomial", data = .lm.dt)
+    lm(yhat ~ pathoAD, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_ad_twas_unc.txt.gz"
@@ -120,7 +120,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .ad.fun0,
-                                .term = "yhat")
+                                .term = "pathoAD")
 
     out.dt <- do.call(rbind, .out)
 
@@ -131,12 +131,37 @@ if(!file.exists(assoc.file)) {
     fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
 }
 
-#############################
-## testing singleton terms ##
-#############################
+.apoe.fun0 <- function(.lm.dt) {
+    lm(yhat ~ apoe.e4, data = .lm.dt)
+}
+
+assoc.file <- "result/step7/phenotype_apoe_twas_unc.txt.gz"
+
+if(!file.exists(assoc.file)) {
+
+    clust <- parallel::makeCluster(12)
+
+    .files <- str_c("result/step7/chr", 1:22, "_poly.bed.gz")
+    .out <- parallel::parLapply(clust, .files,
+                                fun = read.assoc,
+                                .glm.fun = .apoe.fun0,
+                                .term = "apoe.e4")
+
+    out.dt <- do.call(rbind, .out)
+
+    out.dt[,
+           c("lfsr", "svalue", "lfdr", "qvalue") := fit.ashr(.SD),
+           by = .(celltype)]
+
+    fwrite(out.dt, assoc.file, sep="\t", quote=FALSE)
+}
+
+##################################################
+## testing singleton terms conditioning on apoe ##
+##################################################
 
 .np.fun <- function(.lm.dt) {
-    lm(np_sqrt ~ apoe.e4 + yhat, data = .lm.dt)
+    lm(yhat ~ apoe.e4 + np_sqrt, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_np_twas.txt.gz"
@@ -149,7 +174,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .np.fun,
-                                .term = "yhat")
+                                .term = "np_sqrt")
 
     out.dt <- do.call(rbind, .out)
 
@@ -161,7 +186,7 @@ if(!file.exists(assoc.file)) {
 }
 
 .nft.fun <- function(.lm.dt) {
-    lm(nft_sqrt ~ apoe.e4 + yhat, data = .lm.dt)
+    lm(yhat ~ apoe.e4 + nft_sqrt, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_nft_twas.txt.gz"
@@ -174,7 +199,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .nft.fun,
-                                .term = "yhat")
+                                .term = "nft_sqrt")
 
     out.dt <- do.call(rbind, .out)
 
@@ -186,7 +211,7 @@ if(!file.exists(assoc.file)) {
 }
 
 .ad.fun <- function(.lm.dt) {
-    glm(pathoAD ~ apoe.e4 + yhat, family = "binomial", data = .lm.dt)
+    lm(yhat ~ apoe.e4 + pathoAD, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_ad_twas.txt.gz"
@@ -199,7 +224,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .ad.fun,
-                                .term = "yhat")
+                                .term = "pathoAD")
 
     out.dt <- do.call(rbind, .out)
 
@@ -215,7 +240,7 @@ if(!file.exists(assoc.file)) {
 ###############################
 
 .np.inter.fun <- function(.lm.dt) {
-    lm(np_sqrt ~ apoe.e4 + apoe.e4:yhat + yhat, data = .lm.dt)
+    lm(yhat ~ apoe.e4 + apoe.e4:np_sqrt + np_sqrt, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_np_interaction.txt.gz"
@@ -228,7 +253,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .np.inter.fun,
-                                .term = "apoe.e4:yhat")
+                                .term = "apoe.e4:np_sqrt")
 
     out.dt <- do.call(rbind, .out)
 
@@ -240,7 +265,7 @@ if(!file.exists(assoc.file)) {
 }
 
 .nft.inter.fun <- function(.lm.dt) {
-    lm(nft_sqrt ~ apoe.e4 + apoe.e4:yhat + yhat, data = .lm.dt)
+    lm(yhat ~ apoe.e4 + apoe.e4:nft_sqrt + nft_sqrt, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_nft_interaction.txt.gz"
@@ -253,7 +278,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .nft.inter.fun,
-                                .term = "apoe.e4:yhat")
+                                .term = "apoe.e4:nft_sqrt")
 
     out.dt <- do.call(rbind, .out)
 
@@ -265,8 +290,7 @@ if(!file.exists(assoc.file)) {
 }
 
 .ad.inter.fun <- function(.lm.dt) {
-    glm(pathoAD ~ apoe.e4 + apoe.e4:yhat + yhat,
-        family = "binomial", data = .lm.dt)
+    lm(yhat ~ apoe.e4 + apoe.e4:pathoAD + pathoAD, data = .lm.dt)
 }
 
 assoc.file <- "result/step7/phenotype_ad_interaction.txt.gz"
@@ -279,7 +303,7 @@ if(!file.exists(assoc.file)) {
     .out <- parallel::parLapply(clust, .files,
                                 fun = read.assoc,
                                 .glm.fun = .ad.inter.fun,
-                                .term = "apoe.e4:yhat")
+                                .term = "apoe.e4:pathoAD")
 
     out.dt <- do.call(rbind, .out)
 

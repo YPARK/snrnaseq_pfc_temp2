@@ -38,7 +38,7 @@ Oli	oligodendrocytes	#E01F25
 Opc	oligodendrocyte progenitor cells	#FBBC74
 OPC	oligodendrocyte progenitor cells	#FBBC74
 Vasc	vasculature	#FD7C21
-Per	pericytes / endothelial cells	#43A2CA
+Per	pericytes	#43A2CA
 Eap	pericytes / endothelial cells	#FD7C21
 End	endothelial cells	#FD7C21
 Endo	endothelial cells	#FD7C21

@@ -18,6 +18,8 @@ num.round <- function(x, d=2) round(x, digits = d) %>% as.character()
 
 num.int <- function(x) format(x, big.mark = ',')
 
+.n <- function(...) length(unique(...))
+
 .gsub.rm <- function(x, pat) gsub(x, pattern = pat, replacement = '')
 
 .unlist <- function(...) unlist(..., use.names = FALSE)
@@ -57,8 +59,8 @@ log.msg <- function(...) {
                        legend.text = element_text(size = 6),
                        legend.title = element_text(size = 6),
                        axis.title = element_text(size = 8),
-                       legend.key.width = unit(1, 'lines'),
-                       legend.key.height = unit(.2, 'lines'),
+                       legend.key.width = unit(.5, 'lines'),
+                       legend.key.height = unit(.3, 'lines'),
                        legend.key.size = unit(1, 'lines'),
                        axis.line = element_line(color = 'gray20', size = .5),
                        axis.text = element_text(size = 6))
@@ -132,6 +134,109 @@ order.pair <- function(pair.tab, ret.tab=FALSE) {
     }
 
     return(ret)
+}
+
+################################################################
+
+read.celltype.order <- function(.color.file = "../data/brain_colors.txt") {
+
+    .dt <- fread(.color.file)
+
+    .order <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
+                "In-PV", "In-SST", "In-SV2C", "In-VIP",
+                "OPC", "Oligo", "Microglia", "Astro",
+                "Endo", "Per", "Fib", "SMC")         
+
+    data.table(celltype = .order) %>%
+        left_join(.dt)
+}
+
+################################################################
+#' read GWAS catalog
+#'
+read.gwas.catalog <- function(.tsv.file = "gwas_catalog_v1.0-associations.tsv.gz",
+                              .info.file = "../result/step1/gene.info.gz") {
+
+    .file <- ".gwas_catalog.rdata"
+
+    if(!file.exists(.file)) {
+
+        gene.info <- fread(.info.file, header=TRUE, sep = "\t")
+
+        gwas.catalog <-
+            fread(.tsv.file, sep="\t", header=TRUE, quote="") %>% 
+            filter(`P-VALUE` < 5e-8)
+
+        find.gwas.genes <- function(.trait){
+            .temp <- gwas.catalog[str_detect(`DISEASE/TRAIT`, .trait) &
+                                  (str_length(`MAPPED_GENE`) > 0 |
+                                   str_length(`REPORTED GENE(S)`) > 0),
+                                  .(`MAPPED_GENE`)]
+
+            .clean <- function(x){
+                unlist(x) %>%
+                    str_split(pattern="[,]") %>%
+                    unlist %>%
+                    str_split(pattern="[ - ]") %>%
+                    unlist %>%
+                    str_trim(side="both") %>% 
+                    unique
+            }
+
+            unique(c(.clean(.temp$`MAPPED_GENE`),
+                     .clean(.temp$`REPORTED GENE(S)`)))
+        }
+
+        .traits <-
+            gwas.catalog[`INITIAL SAMPLE SIZE` >= 1e4,
+                         .(n = .n(`MAPPED_GENE`)),
+                         by = .(`DISEASE/TRAIT`)] %>%
+            filter(!str_detect(`DISEASE/TRAIT`, "(MTAG)")) %>% 
+            filter(!str_detect(`DISEASE/TRAIT`, "history")) %>% 
+            filter(!str_detect(`DISEASE/TRAIT`, "pleiotropy"))
+
+        gwas.catalog.clean <- data.table()
+
+        for(tt in .traits$`DISEASE/TRAIT`) {
+            .dt <- data.table(hgnc_symbol = find.gwas.genes(tt), trait = tt)
+            gwas.catalog.clean <- rbind(gwas.catalog.clean,.dt)
+        }
+
+        gwas.catalog.clean <- gwas.catalog.clean[!is.na(hgnc_symbol) &
+                                                 hgnc_symbol != "NA" &
+                                                 str_length(hgnc_symbol) > 2]
+
+        gwas.catalog.clean <- gwas.catalog.clean %>%
+            left_join(gene.info)
+
+        save(gwas.catalog.clean, file = .file)
+    }
+
+    load(.file) # -> gwas.catalog.clean
+    return(gwas.catalog.clean)
+}
+
+#' run GOSEQ analysis for the selected ensembl gene IDs
+#' @param .de.ensg a vector of ensembl_gene_id
+#' @param .gwas GWAS catalog read by read.gwas.catalog
+run.goseq.gwas <- function(.de.ensg, .gwas = NULL) {
+
+    if(is.null(.gwas)) {
+        .gwas.file <- "gwas_catalog_v1.0-associations.tsv.gz"
+        .gwas <- read.gwas.catalog(.gwas.file) %>% na.omit
+    }
+
+    .gs <- .gwas[, .(ensembl_gene_id, trait)] %>% na.omit
+    .ensg <- sort(unique(.gs$ensembl_gene_id))
+    gene.vector <- as.integer(.ensg %in% .de.ensg)
+    names(gene.vector) <- .ensg
+    pwf <- goseq::nullp(gene.vector, "hg19", "ensGene", plot.fit = FALSE)
+
+    .temp <- .gs[, .(list = list(trait)), by = .(ensembl_gene_id)]
+    .gs.list <- .temp$list
+    names(.gs.list) <- .temp$ensembl_gene_id
+
+    goseq::goseq(pwf, gene2cat = .gs.list)
 }
 
 ################################################################
