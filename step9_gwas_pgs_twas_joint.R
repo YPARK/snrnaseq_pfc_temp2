@@ -45,6 +45,10 @@ ld.tab <- fread(LD.FILE) %>%
     mutate(ld = 1:n()) %>%
     as.data.frame
 
+.file.size <- function(x) {
+    file.info(x)$size
+}
+
 take.twas.data <- function(ld.idx) {
     qq <- ld.tab[ld.idx, "qq"]
     .chr <- ld.tab[ld.idx, "#CHR"]
@@ -53,6 +57,10 @@ take.twas.data <- function(ld.idx) {
 
     .gwas.file <- sprintf("%s/%s/%04d.bed.gz", GWAS.DIR, GWAS.NAME, ld.idx)
     .eqtl.file <- EQTL.DIR %&% "/chr" %&% .chr %&% "_poly.bed.gz"
+
+    if(.file.size(.gwas.file) < 100) return(NULL)
+    if(.file.size(.eqtl.file) < 100) return(NULL)
+
     .gwas.dt <- fread("tabix -h " %&% .gwas.file %&% " " %&% qq)
     .eqtl.dt <- fread("tabix -h " %&% .eqtl.file %&% " " %&% qq)
 
@@ -83,6 +91,13 @@ if(is.null(.data)) {
 
 y <- .data %>% select(gwas.tot) %>% as.matrix %>% scale
 x <- .data %>% select(-gwas.tot) %>% as.matrix %>% scale
+
+if(sum(is.finite(y)) < 10 || var(y, na.rm = TRUE) < 1e-4) {
+    log.msg("zero variance data")
+    write_tsv(data.frame(), out.stat.file)
+    write_tsv(data.frame(), out.pve.file)
+    q()
+}
 
 if(DO.PERMUTE){
     y <- apply(y, 2, function(.y) sample(.y))
