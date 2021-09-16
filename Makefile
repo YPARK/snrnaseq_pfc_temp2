@@ -434,8 +434,8 @@ jobs/step9/celltype_%.jobs.gz:
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=2:00:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
 jobs/step9/%.long.gz: jobs/step9/%.jobs.gz
-	gzip -cd $< | awk 'system(" ! [ -f " $$NF ".stat.gz ]") == 0' | gzip > $@
-	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=8g -l h_rt=4:00:00 -b y -j y -N STEP9_$* -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
+	gzip -cd $< | awk 'system(" ! [ -f " $$(NF - 1) ".stat.gz ]") == 0' | gzip > $@
+	[ $$(gzip -cd $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=8g -l h_rt=4:00:00 -b y -j y -N STEP9_$* -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
 
 # result/step9/%.obs.stat.gz:
 # 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
