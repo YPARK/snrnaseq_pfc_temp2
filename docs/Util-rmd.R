@@ -16,7 +16,7 @@ num.sci <- function(x) format(x, digits = 2, scientific = TRUE)
 
 num.round <- function(x, d=2) round(x, digits = d) %>% as.character()
 
-num.int <- function(x) format(x, big.mark = ',')
+num.int <- function(x) format(as.integer(x), big.mark = ',')
 
 .n <- function(...) length(unique(...))
 

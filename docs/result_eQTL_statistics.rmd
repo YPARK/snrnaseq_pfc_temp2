@@ -1,0 +1,359 @@
+---
+title: eQTL summary statistics
+date: "`r Sys.Date()`"
+---
+
+```{r global_setting, include = FALSE}
+library(data.table)
+library(tidyverse)
+library(patchwork)
+source("Util-rmd.R")
+
+fig.dir = 'Fig/eQTL/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+
+knitr::opts_knit$set(eval.after = 'fig.cap')
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.path = fig.dir)
+knitr::opts_chunk$set(fig.width=8, fig.height=8, results = "asis", echo = FALSE)
+options(stringsAsFactors = FALSE)
+FIG.CAP = '**Fig.**'
+```
+
+```{sh download_gwas_catalog}
+if ! [ -f gwas_catalog_v1.0-associations.tsv.gz ] ; then
+	wget https://www.ebi.ac.uk/gwas/api/search/downloads/full
+	cat full | gzip -c > gwas_catalog_v1.0-associations.tsv.gz
+fi
+```
+
+```{r read_gwas_genes_info}
+gwas.catalog <-
+    read.gwas.catalog("gwas_catalog_v1.0-associations.tsv.gz") %>%
+    na.omit
+gene.info <- fread("../result/step1/gene.info.gz", header=TRUE, sep = "\t")
+ct.order.dt <- read.celltype.order()
+```
+
+```{r pseudobulk_statistics}
+.file <- ".result_eqtl_pb_stat.rdata"
+
+if(!file.exists(.file)) {
+    read.pb.stat <- function(ct) {
+        .hdr <- str_c("../result/step5/pseudobulk/", ct)
+        .cols <- fread(str_c(.hdr, ".mu_cols.gz"), header=FALSE) %>% unlist
+        ret <- fread(str_c(.hdr, ".sum.gz"), header=FALSE, col.names=.cols)
+        .hdr <- str_c("../result/step5/filtered/", ct)
+        .rows <- fread(str_c(.hdr, ".rows.gz"), header=FALSE, col.names="V1")
+        .rows[, c("ensembl_gene_id", "hgnc_symbol") := tstrsplit(V1, "_")]
+        .rows[, V1 := NULL]
+        ret <- data.table(mean = apply(ret, 1, mean),
+                          tot = apply(ret, 1, sum),
+                          sd = apply(ret, 1, sd))
+        ret <- cbind(.rows, ret) %>% mutate(celltype=ct)
+        return(ret)
+    }
+    ct.pb.stat <-
+        lapply(ct.order.dt$celltype, read.pb.stat) %>%
+        do.call(what = "rbind")
+
+    save(ct.pb.stat, file = .file)
+}
+load(.file) # --> ct.pb.stat
+```
+
+
+## Reading and curating eQTL results
+
+```{r}
+pip.cutoff <- .5
+lodds.cutoff <- log(pip.cutoff/(1-pip.cutoff))
+```
+
+```{r read_strong_eqtl_result}
+lenient.cutoff <- log(0.05/0.95)
+
+.file <- ".result_eqtl_stat.rdata"
+
+read.eqtl.stat <- function(.file, .cutoff) {
+    require(data.table)
+    require(tidyverse)
+    .cmd <- str_c("gzip -cd ",.file," | awk '$NF > ", .cutoff,"'")
+    fread(cmd = .cmd)
+}
+
+.eqtl.files <- str_c("../result/step7/chr", 1:22, "_stat.bed.gz")
+
+if(!file.exists(.file)){
+    cl <- parallel::makeCluster(10)
+    .eqtl.stat <- parallel::parLapply(cl, .eqtl.files,
+                                      read.eqtl.stat,
+                                      .cutoff = lenient.cutoff) %>%
+        do.call(what = rbind)
+    parallel::stopCluster(cl)
+    save(.eqtl.stat, file = .file)
+}
+
+load(.file) # -> .eqtl.stat
+.eqtl.stat <- left_join(.eqtl.stat, gene.info) %>%
+    mutate(pip = sigmoid(lodds)) %>%
+    mutate(lb = abs(`stop` - transcript_start.hg19)) %>% 
+    mutate(ub = abs(`stop` - transcript_end.hg19)) %>% 
+    mutate(dist = pmin(lb, ub)) %>% 
+    as.data.table
+.pve.stat <- fread("../result/step7/gene_pve.bed.gz")
+```
+
+## Results
+
+### Multivariate eQTL calling results
+
+```{r fig.width=3, fig.height=6}
+.eqtl.count <- .eqtl.stat[, .(n = .N),
+                          by = .(floor(pip*20)/20,
+                                 floor(-log10(pmax(p.val, 1e-10))))] %>% 
+    rename(pip = `floor`) %>%
+    rename(p.val = `floor.1`)
+
+.pip.scale <-
+    scale_x_continuous("multivariate posterior probability",
+                       labels = num.round,
+                       breaks = seq(.05, .95, .1))
+
+.nsnp.scale <- scale_y_continuous("# SNPs",
+                                  labels = function(x) round(x*x),
+                                  breaks = sqrt(c(1e3,1e4,5e4,1e5,5e5,1e6)))
+
+p1 <-
+    .gg.plot(.eqtl.count[, .(n = sum(`n`)), by = .(pip)]) +
+    .pip.scale +
+    .nsnp.scale +
+    geom_segment(aes(x = pip, xend = pip, y = 0, yend = sqrt(`n`)), size=1.5, colour = "gray") +
+    theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1))
+
+.nsnp.fill <- 
+    scale_fill_distiller("# SNPs",
+                         labels = function(x) round(10^x),
+                         direction = 1,
+                         palette = "PuRd",
+                         breaks = log10(c(1, 10, 1e3, 1e5)))
+
+.pval.scale <- scale_y_continuous("univariate p-value",
+                                  labels = function(x) num.sci(10^(-x)),
+                                  breaks = seq(0,10,2))
+
+p2 <- 
+    .gg.plot(.eqtl.count, aes(x = pip, y = p.val, fill = log10(n))) +
+    geom_tile() +
+    theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1)) +
+    .nsnp.fill +
+    .pval.scale +
+    .pip.scale
+
+.dist.count <-
+    .eqtl.stat[, .(n = .N),
+               by = .(floor(pip*20)/20,
+                      floor(dist/1e5)*1e2)] %>% 
+    rename(pip = `floor`) %>%
+    rename(dist = `floor.1`)
+
+.kb.scale <-
+    scale_y_continuous("distance (kb)", labels = num.int)
+
+p3 <-
+    .gg.plot(.dist.count, aes(x = pip, y = dist, fill = log10(n))) +
+    geom_tile() +
+    theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1)) +
+    .kb.scale +
+    .nsnp.fill +
+    .pip.scale
+
+plt <- p1 / p2 / p3
+print(plt)
+.file <- fig.dir %&% "/Fig_eqtl_stat.pdf"
+.gg.save(file = .file, plot = plt, width = 3, height = 6)
+```
+
+### Multivariate effect size estimation captures a unique aspect of gene expression regulations
+
+```{r fig.width=3, fig.height=8}
+.gene.stat <- 
+    .eqtl.stat[,
+               .(pip = max(pip), p.val = min(p.val)),
+               by = .(hgnc_symbol, celltype)] %>%
+    left_join(.pve.stat)
+
+.dt.pip <- .gene.stat[, .(n = .N), by = .(floor(pip*20)/20)] %>% 
+    rename(pip = `floor`)
+
+.x.scale <- scale_x_continuous("multivariate posterior probability",
+                               labels = num.round)
+
+p1 <-
+    .gg.plot(.dt.pip, aes(x = pip, y = n)) +
+    .x.scale +
+    scale_y_continuous("# genes", labels = num.int) +
+    geom_bar(stat="identity", size = 1) +
+    geom_vline(xintercept = pip.cutoff, size = .5, colour = "red", lty = 2)
+
+
+p2 <- 
+    .gg.plot(.gene.stat, aes(x = pip, y = -log10(pmax(p.val, 1e-10)))) +
+    geom_hex(aes(colour = ..count..)) +
+    geom_vline(xintercept = pip.cutoff, size = .5, colour = "white", lty = 2) +
+    .x.scale +
+    .pval.scale +
+    scale_colour_distiller(trans = "log10", guide="none", direction = 1, palette = "PuRd") +
+    scale_fill_distiller(trans = "log10", direction = 1, palette = "PuRd")
+
+p3 <- 
+    .gg.plot(.gene.stat, aes(x = pip, y = pve)) +
+    geom_hex(aes(colour = ..count..)) +
+    geom_vline(xintercept = pip.cutoff, size = .5, colour = "white", lty = 2) +
+    ylab("PVE by cis-variants") +
+    .x.scale +
+    scale_colour_distiller(trans = "log10", guide="none", direction = 1, palette = "PuRd") +
+    scale_fill_distiller(trans = "log10", direction = 1, palette = "PuRd")
+
+.dt.combined <- .gene.stat %>% left_join(ct.pb.stat)
+.dt.combined[is.na(`tot`), `tot` := 0]    
+.dt.combined[is.na(`mean`), `mean` := 0]    
+.dt.combined[is.na(`sd`), `sd` := 0]    
+
+p4 <-
+    .gg.plot(.dt.combined, aes(x = pip, log2(1 + `mean`))) +
+    geom_hex(aes(colour = ..count..)) +
+    geom_vline(xintercept = pip.cutoff, size = .5, colour = "white", lty = 2) +
+    scale_y_continuous("average expression", labels = function(x) num.int(pmax(2^(x) - 1, 0)), breaks = log2(1+ c(1, 100, 1e3, 1e4, 1e5))) +
+    .x.scale +
+    scale_colour_distiller(trans = "log10", guide="none", direction = 1, palette = "PuRd") +
+    scale_fill_distiller(trans = "log10", direction = 1, palette = "PuRd")
+
+plt <- p1 / p2 / p3 / p4
+print(plt)
+.file <- fig.dir %&% "/Fig_gene_stat.pdf"
+.gg.save(file = .file, plot = plt, width = 3, height = 8)
+```
+
+### How many variants per gene (with PIP cutoff > `r pip.cutoff`)?
+
+We identified `r num.int(nrow(.eqtl.stat[lodds>lodds.cutoff]))` significant eQTL variants on `r num.int(.n(.eqtl.stat[lodds>lodds.cutoff]$ensembl_gene_id))` genes across `r length(unique(.eqtl.stat[lodds>lodds.cutoff]$celltype))` cell types.
+
+```{r}
+.ct.sum <- .eqtl.stat[lodds > lodds.cutoff,
+                      .(nv = .n(`#chr` %&% ":" %&% `stop`), ngene = .n(hgnc_symbol)),
+                      by = .(celltype)]
+
+.gene.sum <- .eqtl.stat[lodds > lodds.cutoff,
+                        .(nv = .n(`#chr` %&% ":" %&% `stop`),
+                          nct = .n(celltype)),
+                        by = .(hgnc_symbol)]
+
+.var.sum <- .eqtl.stat[lodds > lodds.cutoff,
+                       .(ng = .n(hgnc_symbol),
+                         nct = .n(celltype),
+                         dist = pmin(abs(`stop` - `transcript_start.hg19`),
+                                     abs(`stop` - `transcript_end.hg19`))),
+                       by = .(`#chr`, `stop`)]
+```
+
+
+```{r fig.width=3, fig.height=4}
+.df <- .ct.sum %>%
+    mutate(ct = factor(celltype, ct.order.dt$celltype, ct.order.dt$ct.name))
+
+p1 <-
+    .gg.plot(.df, aes(x = ct, y = nv, fill = ct)) +
+    ylab("number of variants") +
+    geom_bar(stat="identity") +
+    scale_fill_manual(values = ct.order.dt$hex) +
+    theme(legend.position = "none") +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.title.x = element_blank())
+
+p2 <-
+    .gg.plot(.df, aes(x = ct, y = ngene, fill = ct)) +
+    ylab("number of genes") +
+    xlab("cell types") +
+    geom_bar(stat="identity") +
+    scale_fill_manual(values = ct.order.dt$hex) +
+    theme(legend.position = "none") +
+    theme(axis.text.x = element_text(angle=90, vjust=.5, hjust=1))
+
+plt <- p1/p2
+print(plt)
+.file <- fig.dir %&% "/Fig_celltype_count_eQTL_eGene.pdf"
+.gg.save(file = .file, plot = plt, width = 3, height = 4)
+```
+
+
+
+## Overlapping with GWAS genes
+
+### Show cell-type-specific enrichment of GWAS genes
+
+```{r run_gwas_gene_test}
+.file <- ".result_eqtl_gwas.rdata"
+if(!file.exists(.file)) {
+    gwas.gene.test.dt <- 
+        lapply(ct.order.dt$celltype, function(ct){
+            .de.genes <- .gene.stat[lodds > lodds.cutoff & celltype == ct] %>% 
+                select(ensembl_gene_id) %>% 
+                unique %>% 
+                unlist %>% 
+                run.goseq.gwas(.gwas = gwas.catalog) %>%
+                mutate(celltype = ct) %>%
+                as.data.table
+        }) %>%
+        do.call(what = rbind) %>% 
+        select(-under_represented_pvalue) %>% 
+        rename(trait = category, p.val = over_represented_pvalue)
+    save(gwas.gene.test.dt, file = .file)
+}
+load(.file) ## -> gwas.gene.test.dt
+gwas.gene.test.dt[, q.val := p.adjust(p.val, "fdr"), by = .(celltype)]
+```
+
+* `r num.int(.n(gwas.gene.test.dt$trait))` traits
+
+```{r fig.width=7, fig.height=4}
+.traits <- 
+    gwas.gene.test.dt %>%
+    filter(q.val < .25) %>% 
+    select(trait) %>%
+    unique %>%
+    unlist
+
+.gwas.show <-
+    gwas.gene.test.dt[trait %in% .traits] %>%
+    mutate(row = celltype, col = trait, weight = -log10(q.val)) %>% 
+    col.order(.ro = rev(ct.order.dt$celltype), ret.tab = TRUE)
+
+.scale.size <- scale_size_continuous("q-value",
+                                     range=c(.1,3),
+                                     breaks=-log10(c(1, 0.5, 0.1, 0.05, 0.01)),
+                                     labels= function(x) num.sci(10^(-x)))
+
+.scale.fill <- scale_fill_distiller("# overlapped genes",
+                                    palette = "PuRd",
+                                    direction = 1,
+                                    trans="log10",
+                                    breaks = c(1, 10, 100, 500))
+
+.aes <- aes(y = row, x = col,
+            size = pmin(weight, 2),
+            fill = numDEInCat)
+
+plt <-
+    .gg.plot(.gwas.show, .aes) +
+    ylab("cell type") +
+    scale_x_discrete("GWAS traits", position = "top") +
+    .scale.fill +
+    .scale.size +
+    theme(axis.text.x = element_text(angle=90, vjust=0, hjust=0)) +
+    geom_point(pch=22, stroke = .2)
+
+print(plt)
+.file <- fig.dir %&% "/Fig_gwas_eGene.pdf"
+.gg.save(file = .file, plot = plt, width = 7, height = 4)
+```
+

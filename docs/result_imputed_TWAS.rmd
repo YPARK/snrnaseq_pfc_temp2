@@ -1,0 +1,146 @@
+---
+title: "Imputed Transcriptome-Wide Association Study"
+date: "`r Sys.Date()`"
+---
+
+```{r}
+library(data.table)
+library(tidyverse)
+source("Util-rmd.R")
+
+fig.dir = 'Fig/iTWAS/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+
+knitr::opts_knit$set(eval.after = 'fig.cap')
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.path = fig.dir)
+knitr::opts_chunk$set(fig.width=8, fig.height=8)
+options(stringsAsFactors = FALSE)
+FIG.CAP = '**Fig.**'
+```
+
+```{r read_celltype_order}
+ct.order.dt <- read.celltype.order()
+gene.info <- fread("../result/step1/gene.info.gz", header=TRUE)
+gwas.info <- read.gwas.catalog()
+```
+
+```{r read_pheno_file}
+pheno.file <- "../data/rosmap_phenotype.csv.gz"
+
+pheno.dt <-
+    fread(pheno.file, na.strings = "-9") %>%
+    mutate(iid = as.integer(projid)) %>%
+    filter(!is.na(iid)) %>%
+    mutate(apoe.e4 = if_else(str_ends(apoe_genotype, "4"), 1, 0)) %>%
+    select(-apoe_genotype) %>%
+    select(iid, pathoAD, apoe.e4, np_sqrt, nft_sqrt,
+           cogn_ep_random_slope, educ, msex, age_death)
+```
+
+```{r read_imputed_twas_results}
+twas.dt <- 
+    rbind(
+        fread("../result/step7/phenotype_np_twas_unc.txt.gz") %>%
+        mutate(pheno = "NP"),
+        fread("../result/step7/phenotype_nft_twas_unc.txt.gz") %>%
+        mutate(pheno = "NFT"),
+        fread("../result/step7/phenotype_apoe_twas_unc.txt.gz") %>%
+        mutate(pheno = "APOE"),
+        fread("../result/step7/phenotype_np_twas.txt.gz") %>% 
+        mutate(pheno = "NP|APOE"),
+        fread("../result/step7/phenotype_nft_twas.txt.gz") %>% 
+        mutate(pheno = "NFT|APOE"),
+        fread("../result/step7/phenotype_np_interaction.txt.gz") %>% 
+        mutate(pheno = "NP:APOE"),
+        fread("../result/step7/phenotype_nft_interaction.txt.gz") %>% 
+        mutate(pheno = "NFT:APOE")
+    )
+```
+
+
+
+```{r}
+.show <- twas.dt[lfdr < .1, .(hgnc_symbol)] %>% unique %>% unlist
+
+.hgnc.order <-
+    twas.dt[hgnc_symbol %in% .show, ] %>% 
+    group_by(hgnc_symbol, celltype) %>%
+    slice(which.min(qvalue)) %>% 
+    ungroup() %>% 
+    mutate(row = celltype, col = hgnc_symbol) %>%
+    mutate(weight = `Estimate` / `Std. Error`) %>% 
+    col.order(.ro = rev(ct.order.dt$celltype))
+
+twas.show <-
+    twas.dt[hgnc_symbol %in% .show] %>%
+    mutate(ct = factor(celltype,
+                       rev(ct.order.dt$celltype),
+                       rev(ct.order.dt$ct.name))) %>%
+    mutate(gene = factor(hgnc_symbol, .hgnc.order)) %>%
+    left_join(gene.info %>% select(-gene))
+```
+
+```{r fig.width = 4, fig.height = 9, results = "asis"}
+.aes <- aes(y = ct,
+            x = gene,
+            fill = pmax(pmin(`Estimate` / `Std. Error`, 4), -4),
+            size = -log10(pmax(qvalue, 1e-2)))
+
+plt <-
+    .gg.plot(twas.show, .aes) +
+    ylab("cell type") +
+    theme(axis.text.x = element_text(angle=90,vjust=0,hjust=0)) +
+    facet_grid(pheno ~ chr, scales="free", space="free") +
+    geom_point(pch = 22, stroke = .1) +
+    scale_x_discrete(position="top") +
+    scale_fill_gradient2("z-score", low="blue", high="red") +
+    scale_size_continuous("FDR", range=c(0, 3), labels=function(x)round(10^(-x), 2))
+
+print(plt)
+.file <- fig.dir %&% "/Fig_all_tests.pdf"
+.gg.save(.file, plot=plt, width = 4, height = 9)
+```
+
+```{r show_each_gene, fig.width=2, fig.height=2.5, results="asis"}
+twas.loc <- 
+    twas.show[lfdr < .1, .(hgnc_symbol, celltype)] %>%
+    unique %>%
+    left_join(gene.info) %>%
+    mutate(.file = str_c("../result/step7/chr", chr, "_poly.bed.gz")) %>%
+    mutate(.bed = str_c(chr, ":", transcript_start.hg19, "-", transcript_end.hg19)) %>% 
+    mutate(cmd = str_c("tabix ", .file, " ", .bed, " -h"))
+
+for(g in 1:nrow(twas.loc)){
+
+    gene.name <- str_c(twas.loc$hgnc_symbol[g], " (", twas.loc$celltype[g], ")")
+
+    .file <- str_c(fig.dir, "/Fig_", twas.loc$hgnc_symbol[g], "_", twas.loc$celltype[g], ".pdf")
+
+    .expr <-
+        fread(cmd = twas.loc$cmd[g]) %>%
+        filter(hgnc_symbol == twas.loc$hgnc_symbol[g]) %>%
+        filter(celltype == twas.loc$celltype[g])
+
+    .dt <-
+        left_join(.expr, pheno.dt) %>%
+        select(np_sqrt, nft_sqrt, apoe.e4, age_death, yhat) %>% 
+        rename(y = yhat) %>% 
+        gather(key = "pheno", value = "x", nft_sqrt, np_sqrt, apoe.e4, age_death) %>%
+        na.omit %>%
+        as.data.table
+
+    plt <- 
+        .gg.plot(.dt[pheno == "apoe.e4"], aes(x = factor(x, c(0,1), c("E2,E3", "E4")), y = y)) +
+        xlab("APOE genotype") + ylab("cis-regulatory genetic expression") +
+        ggtitle(gene.name) +
+        geom_violin(aes(fill = x), show.legend=FALSE, size = 0) +
+        scale_fill_distiller(palette="Paired", direction=1) +
+        geom_boxplot(width = .25, outlier.size = 0, outlier.stroke = 0, size = .3) +
+        ggpubr::stat_compare_means(size=3)
+
+##  geom_point(size=1, stroke=.2, pch = 21, position = position_jitter(w = 0.1, h = 0), colour="gray") +
+
+    print(plt)
+    .gg.save(.file, plot=plt, width = 2, height = 2.5)
+}
+```
