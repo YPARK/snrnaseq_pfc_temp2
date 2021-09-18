@@ -1,0 +1,103 @@
+---
+title: Cell type annotation
+date: "`r Sys.Date()`"
+---
+
+```{r include=FALSE}
+library(tidyverse)
+library(data.table)
+source("Util-rmd.R")
+
+fig.dir = 'Fig/celltype/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+
+knitr::opts_knit$set(eval.after = 'fig.cap')
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.path = fig.dir)
+knitr::opts_chunk$set(fig.width=8, fig.height=8)
+options(stringsAsFactors = FALSE)
+FIG.CAP = '**Fig.**'
+```
+
+
+```{r}
+.col.dt <- fread("../data/brain_colors.txt")
+read.umap <- function(.file, n.max = 20000) {
+
+    .umap.dt <- fread(.file)
+
+    .sub.dt <- .umap.dt[, .SD[sample(nrow(.SD), min(nrow(.SD), n.max)),],
+                       by = .(celltype)]
+
+    .col <- 
+        .sub.dt %>%
+        select(celltype) %>%
+        unique %>%
+        arrange %>%
+        left_join(.col.dt) %>%
+        select(celltype, hex) %>%
+        unique
+
+    .sub.dt <- .sub.dt %>%
+        mutate(ct = factor(celltype, .col$celltype))
+
+    list(dt = .sub.dt, col = .col)
+}
+```
+
+
+```{r Fig_umap_broad, results = "asis", fig.width=4, fig.height=4}
+.broad <- read.umap("../result/step3/bbknn.umap.gz")
+
+plt <-
+    ggplot(.broad$dt, aes(x=UMAP1, y=UMAP2, colour=ct)) +
+    theme_void() +
+    geom_point(stroke=0, size=.5) +
+    scale_colour_manual(values = as.character(.broad$col$hex))
+
+print(plt)
+.file <- fig.dir %&% "/Fig_umap_broad.pdf"
+.gg.save(.file, plot = plt, width = 4, height = 4)
+```
+
+
+```{r Fig_umap_vasc, results = "asis", fig.width=4, fig.height=4}
+.vasc <- read.umap("../result/step4/bbknn/Vasc.umap.gz")
+plt <-
+    ggplot(.vasc$dt, aes(x=UMAP1, y=UMAP2, colour=celltype)) +
+    theme_void() +
+    geom_point(stroke = 0, size = .5) +
+    scale_colour_manual(values = as.character(.vasc$col$hex))
+
+print(plt)
+.file <- fig.dir %&% "/Fig_umap_vasc.pdf"
+.gg.save(.file, plot = plt, width = 4, height = 4)
+```
+
+
+```{r Fig_umap_ex, results = "asis", fig.width=4, fig.height=4}
+.ex <- read.umap("../result/step4/bbknn/Ex.umap.gz")
+plt <-
+    ggplot(.ex$dt, aes(x=UMAP1, y=UMAP2, colour=celltype)) +
+    theme_void() +
+    geom_point(stroke = 0, size = .5) +
+    scale_colour_manual(values = as.character(.ex$col$hex))
+
+print(plt)
+.file <- fig.dir %&% "/Fig_umap_ex.pdf"
+.gg.save(.file, plot = plt, width = 4, height = 4)
+```
+
+
+```{r Fig_umap_in, results = "asis", fig.width=4, fig.height=4}
+.in <- read.umap("../result/step4/bbknn/In.umap.gz")
+plt <-
+    ggplot(.in$dt, aes(x=UMAP1, y=UMAP2, colour=celltype)) +
+    theme_void() +
+    geom_point(stroke = 0, size = .5) +
+    scale_colour_manual(values = as.character(.in$col$hex))
+
+print(plt)
+.file <- fig.dir %&% "/Fig_umap_in.pdf"
+.gg.save(.file, plot = plt, width = 4, height = 4)
+```
+
