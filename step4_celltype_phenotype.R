@@ -115,6 +115,19 @@ fwrite(xy.stat, file = .out.file, sep = " ")
 
 ################################################################
 
+read.celltype.order <- function(.color.file = "data/brain_colors.txt") {
+
+    .dt <- fread(.color.file)
+
+    .order <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
+                "In-PV", "In-SST", "In-SV2C", "In-VIP",
+                "OPC", "Oligo", "Microglia", "Astro",
+                "Endo", "Per", "Fib", "SMC")         
+
+    data.table(celltype = .order) %>%
+        left_join(.dt)
+}
+
 .ggplot <- function(...) {
     ggplot(...) +
     theme_classic() +
@@ -124,6 +137,8 @@ fwrite(xy.stat, file = .out.file, sep = " ")
     theme(axis.text.x = element_blank()) +
     theme(axis.ticks.x = element_blank())
 }
+
+.ct.order <- read.celltype.order()
 
 .ct.most.freq <-
     ct.prop.tab[, .(n = mean(prop)), by = .(celltype)] %>%
@@ -137,13 +152,15 @@ fwrite(xy.stat, file = .out.file, sep = " ")
     unlist
 
 .dt <- ct.prop.tab %>%
-    mutate(col = factor(projid, .co))
+    mutate(col = factor(projid, .co)) %>%
+    mutate(celltype = factor(celltype, .ct.order$celltype))
 
 p1 <-
     .ggplot(.dt, aes(x = col, y = prop, fill = celltype)) +
     ylab("Proportion of cell types") +
     xlab(length(.co) %&% " individuals") +
-    geom_bar(stat="identity")
+    geom_bar(stat="identity") +
+    scale_fill_manual(values = .ct.order$hex)
 
 .dt.tot <- .dt[, .(col, ntot)] %>% distinct
 

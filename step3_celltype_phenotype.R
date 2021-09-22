@@ -5,7 +5,7 @@ argv <- commandArgs(trailingOnly = TRUE)
 
 .pheno.file <- argv[1]  # e.g., .pheno.file <- "data/ROSMAP_clinical.csv" 
 .ct.file <- argv[2]  # e.g., .ct.file <- "result/step3/bbknn.annot.gz" 
-.out.file <- argv[3]
+.out.file <- argv[3] # e.g., .out.file <- 
 
 dir.create("result/step3", recursive = TRUE, showWarnings = FALSE)
 
@@ -13,6 +13,19 @@ library(tidyverse)
 library(data.table)
 library(patchwork)
 source("Util.R")
+
+read.celltype.order <- function(.color.file = "data/brain_colors.txt") {
+
+    .dt <- fread(.color.file)
+
+    .order <- c("Ex",
+                "In",
+                "OPC", "Oligo", "Microglia", "Astro",
+                "Vasc")         
+
+    data.table(celltype = .order) %>%
+        left_join(.dt)
+}
 
 .num.sci <- function(x) format(x, digits=2, scientific=TRUE)
 .num.int <- function(x) format(as.integer(x), big.mark = ',')
@@ -119,21 +132,23 @@ fwrite(xy.stat, file = .out.file, sep = " ")
     theme(axis.ticks.x = element_blank())
 }
 
+.ct <- read.celltype.order()
+
 .co <-
     ct.prop.tab[celltype == "Ex", ] %>% 
     (function(x) { x[order(x$prop), .(projid)] }) %>%
     unlist
 
 .dt <- ct.prop.tab %>%
-    mutate(col = factor(projid, .co))
-
+    mutate(col = factor(projid, .co)) %>%
+    mutate(celltype = factor(celltype, .ct$celltype))
 
 p1 <-
     .ggplot(.dt, aes(x = col, y = prop, fill = celltype)) +
     ylab("Proportion of cell types") +
     xlab(length(.co) %&% " individuals") +
     geom_bar(stat="identity") +
-    scale_fill_brewer(palette = "Paired")
+    scale_fill_manual(values = .ct$hex)
 
 .dt.tot <- .dt[, .(col, ntot)] %>% distinct
 

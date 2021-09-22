@@ -353,7 +353,7 @@ CHR := $(shell seq 1 22)
 EXT := bed.gz bed.gz.tbi
 STAT := stat poly poly_sparse
 
-step7_post: $(foreach chr, $(CHR), $(foreach et, $(EXT), $(foreach tt, $(STAT), result/step7/chr$(chr)_$(tt).$(et)))) $(foreach et, $(EXT), result/step7/gene_pve.$(et))
+step7_post: $(foreach chr, $(CHR), $(foreach et, $(EXT), $(foreach tt, $(STAT), result/step7/chr$(chr)_$(tt).$(et)))) $(foreach et, $(EXT), result/step7/gene_pve.$(et) result/step7/gene_sparse_pve.$(et))
 
 jobs/step7/eqtl_sparse.jobs.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
@@ -392,6 +392,9 @@ result/step7/chr%_poly_sparse.bed.gz:
 
 result/step7/gene_pve.bed.gz:
 	find result/step7/eqtl -name '*poly.bed.gz' -type f -exec gzip -cd {} + | awk -F'\t' '{ k=$$1 FS $$2 FS $$3 FS $$5 FS $$6; if(!(k in data)) data[k] = $$9 FS $$10  } END { for(k in data) print k FS data[k] }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
+
+result/step7/gene_sparse_pve.bed.gz:
+	find result/step7/eqtl -name '*poly_sparse.bed.gz' -type f -exec gzip -cd {} + | awk -F'\t' '{ k=$$1 FS $$2 FS $$3 FS $$5 FS $$6; if(!(k in data)) data[k] = $$9 FS $$10  } END { for(k in data) print k FS data[k] }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
 
 #########################
 # GWAS polygenic scores #

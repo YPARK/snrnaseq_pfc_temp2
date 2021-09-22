@@ -54,9 +54,11 @@ source("Util.R")
     mutate(pheno = factor(variable, .order$cols)) %>% 
     mutate(k = factor(k, .order$rows))
 
+pheno.kmean.df <- .df
+
 .aes <- aes(x = as.factor(projid), y = pheno, fill = pmin(pmax(x, -2), 2))
 
-plt <-
+plt <- p1 <-
     ggplot(.df, .aes) +
     theme_classic() +
     facet_grid(.~ k, space="free", scales="free") +
@@ -73,6 +75,8 @@ plt <-
 
 ggsave(plot=plt, filename="result/step5/phenotype_cluster.pdf", width = 9, height = 2)
 
+################################################################
+
 out.dt <- .pheno.proj[, .(projid, pathoAD)]
 out.dt[, AD := factor(pathoAD, c(0,1), c("Con", "AD"))]
 
@@ -81,3 +85,58 @@ col.dt <- merge(col.dt[projid %in% out.dt$projid], out.dt) %>%
     select(V1, AD)
 
 fwrite(col.dt, file="result/step5/phenotype_cluster.txt.gz", sep=" ", col.names = FALSE)
+
+
+################################################################
+
+read.celltype.order <- function(.color.file = "data/brain_colors.txt") {
+
+    .dt <- fread(.color.file)
+
+    .order <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
+                "In-PV", "In-SST", "In-SV2C", "In-VIP",
+                "OPC", "Oligo", "Microglia", "Astro",
+                "Endo", "Per", "Fib", "SMC")         
+
+    data.table(celltype = .order) %>%
+        left_join(.dt)
+}
+
+.annot.file <- "result/step4/subtype.annot.gz"
+
+.ct.tab <- fread(.ct.file, header=FALSE, col.names = c("cell", "celltype"))
+
+.ct.tab[, c("barcode", "projid") := tstrsplit(cell, "_", fixed=TRUE)]
+.ct.tab[, projid := as.integer(projid)]
+
+ct.prop.tab <- .ct.tab[, .(nct = .N), by = .(celltype, projid)]
+ct.prop.tab[, ntot := sum(nct), by = .(projid)]
+ct.prop.tab[, prop := nct/ntot, by = .(projid)]
+
+.df <-
+    pheno.kmean.df[, .(projid, k)] %>%
+    unique %>% 
+    left_join(ct.prop.tab) %>%
+    na.omit %>% 
+    mutate(celltype = factor(celltype, .ct.order$celltype))
+
+plt <- p2 <-
+    ggplot(.df, aes(y = prop, x = as.factor(projid), fill = celltype)) +
+    theme_classic() +
+    facet_grid(.~ k, space="free", scales="free") +
+    ylab("Proportion of cell types") +
+    xlab("407 samples") +
+    geom_bar(stat="identity") +
+    scale_fill_manual(values = .ct.order$hex) +
+    theme(axis.text.x = element_blank()) +
+    theme(axis.ticks.x = element_blank()) +
+    theme(legend.key.size = unit(.2,"lines")) +
+    theme(legend.title = element_text(size=6)) +
+    theme(legend.text = element_text(size=6))
+
+ggsave(plot=plt, filename="result/step5/phenotype_cluster_cf.pdf", width = 9, height = 2)
+
+plt <- p1/p2
+
+ggsave(plot=plt, filename="result/step5/phenotype_cluster_combined.pdf", width = 9, height = 4)
+

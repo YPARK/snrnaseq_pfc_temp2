@@ -101,7 +101,7 @@ load(.file) # -> .eqtl.stat
     mutate(dist = pmin(lb, ub)) %>%
     as.data.table
 
-.pve.stat <- fread("../result/step7/gene_pve.bed.gz")
+.pve.stat <- fread("../result/step7/gene_pve.bed.gz", sep = "\t")
 ```
 
 ## Results
@@ -325,6 +325,29 @@ print(plt)
 ```
 
 ## Overlapping with GWAS genes
+
+### Assigning cell type specificity to GWAS genes
+
+TODO
+
+
+```{r}
+
+.trait <- "Alzheimer's disease"
+
+.genes <-
+    gwas.catalog[trait == .trait & chr %in% 1:22] %>%
+    left_join(.gene.stat) %>%
+    na.omit
+
+
+
+
+
+```
+
+
+
 
 ### Show cell-type-specific enrichment of GWAS genes
 
@@ -729,3 +752,4 @@ for(g in 1:nrow(.examples)) {
     }
 }
 ```
+
