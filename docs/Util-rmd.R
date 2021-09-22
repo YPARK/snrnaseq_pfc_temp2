@@ -28,6 +28,8 @@ num.int <- function(x) format(as.integer(x), big.mark = ',')
 
 .mkdir <- function(...) dir.create(..., recursive=TRUE, showWarnings = FALSE)
 
+.list.files <- function(...) list.files(..., full.names = TRUE)
+
 log.msg <- function(...) {
     ss = as.character(date())
     cat(sprintf('[%s] ', ss), sprintf(...), '\n', file = stderr(), sep = '')
@@ -219,7 +221,7 @@ read.gwas.catalog <- function(.tsv.file = "gwas_catalog_v1.0-associations.tsv.gz
 #' run GOSEQ analysis for the selected ensembl gene IDs
 #' @param .de.ensg a vector of ensembl_gene_id
 #' @param .gwas GWAS catalog read by read.gwas.catalog
-run.goseq.gwas <- function(.de.ensg, .gwas = NULL) {
+run.goseq.gwas <- function(.de.ensg, .gwas = NULL, .ensg = NULL, ...) {
 
     if(is.null(.gwas)) {
         .gwas.file <- "gwas_catalog_v1.0-associations.tsv.gz"
@@ -227,7 +229,14 @@ run.goseq.gwas <- function(.de.ensg, .gwas = NULL) {
     }
 
     .gs <- .gwas[, .(ensembl_gene_id, trait)] %>% na.omit
-    .ensg <- sort(unique(.gs$ensembl_gene_id))
+
+    if(is.null(.ensg)) {
+        .ensg <- sort(unique(.gs$ensembl_gene_id))
+    }
+
+    .de.ensg <- unique(unlist(.de.ensg))
+    .ensg <- unique(unlist(.ensg))
+
     gene.vector <- as.integer(.ensg %in% .de.ensg)
     names(gene.vector) <- .ensg
     pwf <- goseq::nullp(gene.vector, "hg19", "ensGene", plot.fit = FALSE)
@@ -236,7 +245,24 @@ run.goseq.gwas <- function(.de.ensg, .gwas = NULL) {
     .gs.list <- .temp$list
     names(.gs.list) <- .temp$ensembl_gene_id
 
-    goseq::goseq(pwf, gene2cat = .gs.list)
+    goseq::goseq(pwf, gene2cat = .gs.list, ...)
+}
+
+#' run GOSEQ analysis
+#' @param .de.ensg differentially expressed ENSEMBL ID
+#' @param .ensg total ENSEMBL ID
+run.goseq <- function(.de.ensg, .ensg) {
+
+    .de.ensg <- unique(unlist(.de.ensg))
+    .ensg <- unique(unlist(.ensg))
+
+    gene.vector <- as.integer(.ensg %in% .de.ensg)
+    names(gene.vector) <- .ensg
+
+    pwf <- goseq::nullp(gene.vector, "hg19", "ensGene", plot.fit = FALSE)
+
+    goseq::goseq(pwf, "hg19", "ensGene", use_genes_without_cat = FALSE) %>%
+        as.data.table
 }
 
 ################################################################
