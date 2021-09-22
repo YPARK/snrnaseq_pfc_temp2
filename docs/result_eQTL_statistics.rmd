@@ -667,14 +667,18 @@ plot.example <- function(g, .examples, .res = 1e4) {
     .ct <- unique(.dt$celltype)[1]
 
     .dt.sum <- .dt[,
-                   .(log10.pval = pmin(mean(-log10(p.val)), 30),
-                     log10.pval.lb = pmin(min(-log10(p.val)), 30),
-                     log10.pval.ub = pmin(max(-log10(p.val)), 30),
+                   .(log10.pval = pmin(mean(-log10(p.val)), 10),
+                     log10.pval.lb = pmin(min(-log10(p.val)), 10),
+                     log10.pval.ub = pmin(max(-log10(p.val)), 10),
                      lodds = max(lodds)),
-                   by = .(loc = floor(`stop`/.res),
-                          celltype)]
+                   by = .(loc = floor(`stop`/.res), celltype)]
+                          
+    .dt.sum <- unique(.dt.sum[lodds > 0, .(celltype)]) %>%
+        left_join(.dt.sum)
 
     .dt.sum[, celltype := factor(celltype, ct.order.dt$celltype)]
+
+    if(nrow(.dt.sum) < 1) return(NULL)
 
     p1 <-
         .gg.plot(.dt.sum, aes(x = loc, y = sigmoid(lodds), size = lodds)) +
@@ -696,11 +700,6 @@ plot.example <- function(g, .examples, .res = 1e4) {
                                    labels = function(x) num.int(x*(.res/1e3)))
 
 
-    .hex <- data.table(celltype = sort(unique(.dt.sum$celltype))) %>%
-        left_join(ct.order.dt) %>%
-        select(hex) %>%
-        unlist
-
     p2 <-
         .gg.plot(.dt.sum, aes(x = loc, y = -log10.pval)) +
         theme(strip.text = element_blank()) +
@@ -711,8 +710,7 @@ plot.example <- function(g, .examples, .res = 1e4) {
         geom_vline(xintercept = .tss.loc, colour = "#009900", size = .1, lty = 2) +
         geom_line(aes(y = -log10.pval.ub), size = .5) +
         geom_line(aes(y = -log10.pval.lb), size = .5) +
-        geom_segment(aes(xend = loc, y = -log10.pval.lb, yend = -log10.pval.ub, colour = celltype), size=.1) +
-        scale_colour_manual(values = .hex, guide = "none") +
+        geom_segment(aes(xend = loc, y = -log10.pval.lb, yend = -log10.pval.ub), size=.1) +
         geom_vline(aes(xintercept = loc), data = .dt.sum[lodds > 0],
                    colour = "red", size = .2)
 
@@ -724,8 +722,10 @@ plot.example <- function(g, .examples, .res = 1e4) {
 ```{r fig.width=10, fig.height=2}
 for(g in 1:nrow(.examples)) {
     .out <- plot.example(g, .examples)
-    print(.out$plt)
-    .gg.save(.out$file, plot = .out$plt, width=10, height=2)
-    cat("\n\n")
+    if(!is.null(.out)) {
+        print(.out$plt)
+        .gg.save(.out$file, plot = .out$plt, width=10, height=2)
+        cat("\n\n")
+    }
 }
 ```
