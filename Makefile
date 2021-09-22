@@ -422,16 +422,22 @@ jobs/step8/%.long.gz: jobs/step8/%.jobs.gz
 GWAS := $(shell ls -1 result/step8/subset/)
 TT := obs.stat null.stat obs.pve null.pve
 
-step9: $(foreach tt, joint celltype, $(foreach gwas, $(GWAS), jobs/step9/$(tt)_$(gwas).jobs.gz))
+step9: $(foreach tt, sparse joint celltype, $(foreach gwas, $(GWAS), jobs/step9/$(tt)_$(gwas).jobs.gz))
 
-step9_long: $(foreach tt, joint celltype, $(foreach gwas, $(GWAS), jobs/step9/$(tt)_$(gwas).long.gz))
+step9_long: $(foreach tt, joint sparse celltype, $(foreach gwas, $(GWAS), jobs/step9/$(tt)_$(gwas).long.gz))
 
-step9_post: $(foreach jc, joint celltype, $(foreach on, obs null, $(foreach gwas, $(GWAS), result/step9/$(jc).$(on).$(gwas).stat.gz)))
+step9_post: $(foreach jc, joint sparse celltype, $(foreach on, obs null, $(foreach gwas, $(GWAS), result/step9/$(jc).$(on).$(gwas).stat.gz)))
 
 jobs/step9/joint_%.jobs.gz: 
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
+
+jobs/step9/sparse_%.jobs.gz: 
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
+	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
 jobs/step9/celltype_%.jobs.gz: 
