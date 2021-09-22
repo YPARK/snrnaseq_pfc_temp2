@@ -23,9 +23,21 @@ source("Util-geno.R")
 library(tidyverse)
 library(data.table)
 
+.fread <- function(file.name, ...) {
+    .s <- str_length(file.name)
+    if(str_sub(file.name, .s - 2, .s) == ".gz") {
+        return(fread("gzip -cd " %&% file.name, ...))
+    }
+    return(fread(file.name, ...))
+}
+
+.file.size <- function(x) {
+    file.info(x)$size
+}
+
 .stat.file <- OUT.HDR %&% "_stat.bed.gz"
 
-if(!(file.exists(.stat.file))) {
+if(!(file.exists(.stat.file)) || .file.size(.stat.file) < 100) {
     write_tsv(data.frame(), OUT.HDR %&% "_poly_sparse.bed.gz")
     q()
 }
@@ -43,14 +55,6 @@ CIS.DIST <- 1e6 # cis distance
 dir.create(dirname(OUT.HDR), recursive = TRUE, showWarnings = FALSE)
 TEMP.DIR <- TEMP.DIR %&% OUT.HDR
 dir.create(TEMP.DIR, recursive = TRUE, showWarnings = FALSE)
-
-.fread <- function(file.name, ...) {
-    .s <- str_length(file.name)
-    if(str_sub(file.name, .s - 2, .s) == ".gz") {
-        return(fread("gzip -cd " %&% file.name, ...))
-    }
-    return(fread(file.name, ...))
-}
 
 .bed.write <- function(out.dt, out.file) {
     out.tsv.file <- str_remove(out.file, ".gz$")
