@@ -326,28 +326,6 @@ print(plt)
 
 ## Overlapping with GWAS genes
 
-### Assigning cell type specificity to GWAS genes
-
-TODO
-
-
-```{r}
-
-.trait <- "Alzheimer's disease"
-
-.genes <-
-    gwas.catalog[trait == .trait & chr %in% 1:22] %>%
-    left_join(.gene.stat) %>%
-    na.omit
-
-
-
-
-
-```
-
-
-
 
 ### Show cell-type-specific enrichment of GWAS genes
 
@@ -426,6 +404,73 @@ print(plt)
 .file <- fig.dir %&% "/Fig_gwas_eGene.pdf"
 .gg.save(file = .file, plot = plt, width = 8, height = 3.5)
 ```
+
+### Assigning cell type specificity to GWAS genes
+
+
+```{r fig.width = 8, fig.height = 3}
+show.gwas.genes <- function(.trait) {
+
+    .df <-
+        gwas.catalog[trait == .trait & chr %in% 1:22] %>%
+        left_join(.gene.stat) %>%
+        na.omit %>%
+        mutate(row = celltype, col = hgnc_symbol, weight = logit(pip)) %>%
+        col.order(.ro = rev(ct.order.dt$celltype), ret.tab = TRUE)
+
+    .df.freq <- .gene.stat[pip > pip.cutoff,
+                           .(n = .n(hgnc_symbol)),
+                           by = .(celltype)] %>% 
+        mutate(row = factor(celltype, rev(ct.order.dt$celltype)))
+
+    .df.freq.found <-
+        .df[pip > pip.cutoff,
+            .(n = .n(hgnc_symbol)),
+            by = .(celltype)] %>% 
+        mutate(row = factor(celltype, rev(ct.order.dt$celltype)))
+
+    p1 <-
+        .gg.plot(.df, aes(x = col, y = row, fill = pip)) +
+        geom_tile() +
+        theme(axis.text.x = element_blank()) +
+        theme(axis.ticks.x = element_blank()) +
+        theme(legend.position = "left") +
+        scale_fill_distiller("PIP", direction = 1) +
+        ylab("cell types") +
+        xlab(.n(.df$hgnc_symbol) %&% " " %&% .trait %&% " GWAS genes")
+
+    p2 <-
+        ggplot(.df.freq, aes(y = row, yend = row, x = 0, xend = `n`)) +
+        theme_void() +
+        scale_y_discrete(position = "right") +
+        scale_x_discrete(position = "top") +
+        geom_segment(size = 2, colour = "gray") +
+        geom_text(aes(label = num.int(`n`), x = `n`), size = 2, hjust = 1)
+
+    p2.1 <-
+        ggplot(.df.freq.found, aes(y = row, yend = row, x = 0, xend = `n`)) +
+        theme_void() +
+        scale_y_discrete(position = "right") +
+        scale_x_discrete(position = "top") +
+        geom_segment(size = 2, colour = "gray") +
+        geom_text(aes(label = num.int(`n`), x = `n`), size = 2, hjust = 1)
+
+    plt <- (p1 | p2 | p2.1) + plot_layout(nrow = 1, widths = c(5, 1, .5))
+    return(plt)
+}
+
+for(.trait in .traits){
+    plt <- show.gwas.genes(.trait)
+    print(plt)
+    .code <- str_replace_all(.trait, "[ ']+", "_")
+    .file <- fig.dir %&% "/Fig_gwas_eGene_example_" %&% .code %&% ".pdf"
+    print(.file)
+    .gg.save(file = .file, plot = plt, width = 8, height = 3)
+    cat("\n\n")
+}
+```
+
+
 
 ## Overlapping gene ontology categories
 
