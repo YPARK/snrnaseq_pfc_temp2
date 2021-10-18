@@ -1,0 +1,722 @@
+---
+title: Summary-based TWAS
+date: "`r Sys.Date()`"
+---
+
+```{r global_setting, include = FALSE}
+library(data.table)
+library(tidyverse)
+library(patchwork)
+source("Util-rmd.R")
+
+fig.dir = 'Fig/sTWAS/'
+dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
+
+knitr::opts_knit$set(eval.after = 'fig.cap')
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.path = fig.dir)
+knitr::opts_chunk$set(fig.width=8, fig.height=8, results = "asis")
+options(stringsAsFactors = FALSE)
+FIG.CAP = '**Fig.**'
+```
+
+```{sh download_gwas_catalog}
+if ! [ -f gwas_catalog_v1.0-associations.tsv.gz ] ; then
+	wget https://www.ebi.ac.uk/gwas/api/search/downloads/full
+	cat full | gzip -c > gwas_catalog_v1.0-associations.tsv.gz
+fi
+```
+
+```{r}
+#######################
+## read GWAS catalog ##
+#######################
+
+gwas.catalog <-
+    read.gwas.catalog("gwas_catalog_v1.0-associations.tsv.gz") %>%
+    na.omit
+gene.info <- fread("../result/step1/gene.info.gz", header=TRUE, sep = "\t")
+ct.order.dt <- read.celltype.order()
+
+##########################
+## read eQTL statistics ##
+##########################
+
+.file <- ".result_stwas_eqtl.rdata"
+
+read.eqtl.stat <- function(.file) {
+    require(data.table)
+    require(tidyverse)
+    .cmd <- str_c("gzip -cd ",.file," | awk '$NF > 0'")
+    fread(cmd = .cmd)
+}
+
+if(!file.exists(.file)){
+    cl <- parallel::makeCluster(10)
+    .eqtl.files <- str_c("../result/step7/chr", 1:22, "_stat.bed.gz")
+    .eqtl.stat <-
+        parallel::parLapply(cl, .eqtl.files, read.eqtl.stat) %>%
+        do.call(what = rbind)
+    parallel::stopCluster(cl)
+    save(.eqtl.stat, file = .file)
+}
+
+load(.file) # -> .eqtl.stat
+
+heritable.genes <- .eqtl.stat[, .(hgnc_symbol, celltype)] %>% unique
+
+########################
+## read sTWAS results ##
+########################
+
+read.twas.stat <- function(pat){
+    ret <-
+        .list.files("../result/step9/", pattern = pat) %>%
+        lapply(fread) %>%
+        do.call(what=rbind) %>%
+        mutate(pip = sigmoid(lodds)) %>%
+        as.data.table
+}
+
+.file <- ".result_stwas_stat.rdata"
+if(!file.exists(.file)){
+    obs.stat.dt <- read.twas.stat("joint.obs.*.stat.gz")
+    null.stat.dt <- read.twas.stat("joint.null.*.stat.gz")
+    save(obs.stat.dt, null.stat.dt, file = .file)
+}
+load(.file) # -> obs.stat.dt, null.stat.dt
+
+.file <- ".result_stwas_stat_sparse.rdata"
+if(!file.exists(.file)){
+    obs.sparse.stat.dt <- read.twas.stat("sparse.obs.*.stat.gz")
+    null.sparse.stat.dt <- read.twas.stat("sparse.null.*.stat.gz")
+    save(obs.sparse.stat.dt, null.sparse.stat.dt, file = .file)
+}
+load(.file) # -> obs.sparse.stat.dt, null.sparse.stat.dt
+```
+
+### P-value distributions for marginal associations
+
+```{r fig.width=3, fig.height=3}
+.file <- fig.dir %&% "/Fig_histogram_obs.pdf"
+if(!file.exists(.file)) {
+    pdf(file=.file, useDingbats = FALSE, width = 3, height = 3)
+    hist(obs.stat.dt$p.val, main = "observed", xlab = "p-value")
+    dev.off()
+}
+hist(obs.stat.dt$p.val, main = "observed", xlab = "p-value")
+```
+
+```{r fig.width=3, fig.height=3}
+.file <- fig.dir %&% "/Fig_histogram_null.pdf"
+if(!file.exists(.file)) {
+    pdf(file=.file, useDingbats = FALSE, width = 3, height = 3)
+    hist(null.stat.dt$p.val, main = "permuted", xlab = "p-value")
+    dev.off()
+}
+hist(null.stat.dt$p.val, main = "permuted", xlab = "p-value")
+```
+
+### P-value distributions for marginal associations (sparse)
+
+```{r fig.width=3, fig.height=3}
+.file <- fig.dir %&% "/Fig_histogram_obs_sparse.pdf"
+if(!file.exists(.file)) {
+    pdf(file=.file, useDingbats = FALSE, width = 3, height = 3)
+    hist(obs.sparse.stat.dt$p.val, main = "observed", xlab = "p-value")
+    dev.off()
+}
+hist(obs.sparse.stat.dt$p.val, main = "observed", xlab = "p-value")
+```
+
+```{r fig.width=3, fig.height=3}
+.file <- fig.dir %&% "/Fig_histogram_null_sparse.pdf"
+if(!file.exists(.file)) {
+    pdf(file=.file, useDingbats = FALSE, width = 3, height = 3)
+    hist(null.sparse.stat.dt$p.val, main = "permuted", xlab = "p-value")
+    dev.off()
+}
+hist(null.sparse.stat.dt$p.val, main = "permuted", xlab = "p-value")
+```
+
+### PIP cutoff
+
+```{r fig.width=6, fig.height=6}
+plot.pip.cutoff <- function(obs, null){
+    .df1 <- obs[, .(n = .N), by = .(celltype, floor(pip*20)/20)] %>%
+        mutate(type = "observed")
+
+    .df2 <- null[, .(n = .N), by = .(celltype, floor(pip*20)/20)] %>%
+        mutate(type = "permuted")
+
+    .pip.hist <-
+        rbind(.df1, .df2) %>%
+        rename(pip = `floor`) %>%
+        filter(!is.na(`celltype`), `celltype` != "NA") %>% 
+        na.omit
+
+    .gg.plot(.pip.hist, aes(x = pip, y = log10(n), fill = `type`)) +
+        scale_x_continuous("gene-level posterior probability", breaks = seq(0,1,.1)) +
+        scale_y_continuous("# associated genes", labels = function(x) num.int(10^x)) +
+        facet_wrap(~celltype, scale="free", nrow = 4) +
+        geom_line(size=.2) +
+        geom_point(pch = 21, size = 1, stroke = .2) +
+        scale_fill_manual(values = c("gray20","gray90")) +
+        theme(legend.position="top", axis.text.x=element_text(angle=90, vjust=1, hjust=1))
+}
+
+plt <- plot.pip.cutoff(obs.stat.dt, null.stat.dt)
+print(plt)
+.file <- fig.dir %&% "/Fig_PIP_cutoff.pdf"
+.gg.save(filename = .file, plot = plt, width = 6, height = 6)
+
+plt <- plot.pip.cutoff(obs.sparse.stat.dt, null.sparse.stat.dt)
+print(plt)
+.file <- fig.dir %&% "/Fig_PIP_cutoff_sparse.pdf"
+.gg.save(filename = .file, plot = plt, width = 6, height = 6)
+```
+
+### How many genes per trait?
+
+```{r}
+obs.sparse.stat.dt[, fwer := p.adjust(p.val, "holm"), by = .(gwas)]
+obs.stat.dt[, fwer := p.adjust(p.val, "holm"), by = .(gwas)]
+pip.cutoff <- 0.9
+lodds.cutoff <- logit(pip.cutoff)
+fwer.cutoff <- 0.05
+```
+
+```{r}
+gene.sparse.sum <-
+    obs.sparse.stat.dt[fwer < fwer.cutoff & lodds > lodds.cutoff,
+                       .(ngwas = .n(gwas), nct = .n(celltype)),
+                       by = .(hgnc_symbol)]
+
+gene.sum <-
+    obs.stat.dt[fwer < fwer.cutoff & lodds > lodds.cutoff,
+                .(ngwas = .n(gwas), nct = .n(celltype)),
+                by = .(hgnc_symbol)]
+```
+
+
+
+```{r fig.width=3, fig.height=3}
+plot.gene.sum <- function(.gene.sum) {
+
+    .df <- .gene.sum[, .(n = .N), by = .(nct)]
+
+    .aes <- aes(x = as.factor(nct),
+                xend = as.factor(nct),
+                y = 0, yend = log10(`n`))
+
+    p1 <-
+        .gg.plot(.df, .aes) +
+        geom_segment(size=1, colour = "gray40") +
+        scale_y_continuous(labels = function(x) 10^x) +
+        xlab("#cell types") + ylab("#genes")
+
+    .df <- .gene.sum[, .(n = .N), by = .(ngwas)]
+
+    .aes <- aes(x=0, xend=log10(n), y=ngwas, yend=ngwas)
+
+    p2 <- .gg.plot(.df, .aes) +
+        geom_segment(size=1, color = "gray40") +
+        scale_x_continuous(labels = function(x) 10^x) +
+        theme(axis.text.x = element_text(angle=90, vjust=1, hjust=1)) +
+        ylab("#GWAS traits") + xlab("#genes")
+
+    p12 <- .gg.plot(.gene.sum, aes(x = as.factor(nct), y = ngwas)) +
+        geom_boxplot(outlier.size = 0, outlier.stroke = 0, width = .3, size=.2) +
+        xlab("#cell types") + ylab("#GWAS traits")
+
+    p0 <- ggplot() + theme_void()
+    
+    wrap_plots(p1, p0, p12, p2,
+               ncol = 2, nrow = 2,
+               widths = c(4, 1),
+               heights = c(1, 5))
+
+}
+
+plt <- plot.gene.sum(gene.sum)
+print(plt)
+.file <- fig.dir %&% "/Fig_gene_leve_summary.pdf"
+.gg.save(filename = .file, plot = plt, width = 3, height = 3)
+
+plt <- plot.gene.sum(gene.sparse.sum)
+print(plt)
+.file <- fig.dir %&% "/Fig_sparse_gene_leve_summary.pdf"
+.gg.save(filename = .file, plot = plt, width = 3, height = 3)
+```
+
+### Correspondence between sparse and dense TWAS predictions
+
+```{r}
+.df.1 <- obs.stat.dt[, .(gwas, celltype, hgnc_symbol, theta, beta, pip)]
+.df.2 <- obs.sparse.stat.dt[, .(gwas, celltype, hgnc_symbol, theta, beta, pip)]
+
+.dt <- left_join(.df.1, .df.2,
+                 by = c("gwas", "celltype", "hgnc_symbol"),
+                 suffix = c("", ".sparse")) %>%
+    as.data.table %>%
+    na.omit
+
+.dt.theta <- .dt[, .(dense = mean(theta),
+                     dense.sd = sd(theta)),
+                 by = .(sparse = round(pmax(pmin(theta.sparse, .3), -.3)*20)/20,
+                        celltype)]
+
+.dt.beta <- .dt[, .(dense = mean(beta),
+                    dense.sd = sd(beta)),
+                by = .(sparse = round(pmax(pmin(beta.sparse, .3), -.3)*20)/20,
+                       celltype)]
+
+plot.dt.sum <- function(.dt.sum) {
+    .gg.plot(.dt.sum, aes(x = sparse,
+                          y = dense,
+                          ymin = dense - dense.sd,
+                          ymax = dense + dense.sd)) +
+        facet_wrap(~celltype, scales = "free") +
+        geom_linerange() +
+        geom_point()
+}
+```
+
+```{r fig.width=6, fig.height=6}
+plt <- plot.dt.sum(.dt.beta)
+print(plt)
+.file <- fig.dir %&% "/Fig_correspondence_beta.pdf"
+.gg.save(filename = .file, plot = plt, width = 6, height = 6)
+```
+
+```{r fig.width=6, fig.height=6}
+plt <- plot.dt.sum(.dt.theta)
+print(plt)
+.file <- fig.dir %&% "/Fig_correspondence_theta.pdf"
+.gg.save(filename = .file, plot = plt, width = 6, height = 6)
+```
+
+
+### Dissecting pleiotropic gene modules
+
+```{r fig.width = 10, fig.height = 4}
+take.gene.module <- function(stat.dt) {
+
+    .genes <- stat.dt[lodds > lodds.cutoff &
+                      fwer < fwer.cutoff,
+                      .(hgnc_symbol, celltype)]
+
+    .dt <- .genes %>% left_join(stat.dt)
+
+    .mat <- dcast(.dt, hgnc_symbol + celltype ~ gwas,
+                  value.var = "lodds",
+                  fun.aggregate = max,
+                  fill = -5)
+
+    .data <- .mat %>% select(-hgnc_symbol, -celltype) %>% as.matrix
+
+    .kmeans <- kmeans(.data, centers = 37, nstart = 50, iter.max=100)
+
+    ## Matrix::image(Matrix::Matrix(.kmeans$centers))
+
+    .lab <- .mat[, .(hgnc_symbol, celltype)] %>%
+        mutate(k = .kmeans$cluster)
+
+    .dt <- .dt %>%
+        left_join(.lab)
+
+    .order <- .dt[, .(x = mean(lodds)), by = .(k, gwas)] %>%
+        mutate(col = k, row = gwas, weight = x) %>%
+        order.pair()
+
+    K <- .n(.order$cols)
+    TT <- .n(.order$rows)
+
+    .dt <- .dt %>%
+        mutate(g = factor(gwas, .order$rows, 1:TT)) %>% 
+        mutate(k = factor(k, .order$cols, 1:K)) %>%
+        as.data.table
+}
+
+plot.module.map <- function(.module){
+
+    .order <-
+        .module[, .(g, trait, gwas)] %>%
+        unique %>%
+        arrange(g) %>%
+        mutate(lab = str_c(g, "_", str_replace(trait, "stroke", "stroke-")))
+
+    .module <- .module %>%
+        mutate(g = factor(g, .order$g, .order$lab)) %>%
+        left_join(gene.info)
+
+    .aes <- aes(y = g,
+                x = hgnc_symbol %&% "@" %&% celltype,
+                fill = pip)
+
+    .gg.plot(.module, .aes) +
+        theme(axis.text.x = element_blank()) +
+        theme(axis.ticks.x = element_blank()) +
+        theme(strip.text.x = element_text(size=4)) +
+        theme(legend.position = "top") +
+        theme(legend.key.width = unit(2, "lines")) +
+        facet_grid(.~k, space="free", scales="free") +
+        geom_tile() +
+        xlab("gene and cell-type paris") +
+        ylab("GWAS traits") +
+        scale_fill_distiller("posterior\ninclusion\n probability", direction = 1, palette = "PuRd")
+}
+
+.file <- "share/gene_module_sparse.txt.gz"
+if(!file.exists(.file)){
+    obs.sparse.module <- take.gene.module(obs.sparse.stat.dt)
+    fwrite(obs.sparse.module, file = .file, sep="\t", quote=FALSE)
+}
+obs.sparse.module <- fread(.file, sep="\t", header=TRUE)
+obs.sparse.module[, c("study", "trait") := tstrsplit(gwas, split = "_")]
+
+.file <- "share/gene_module.txt.gz"
+if(!file.exists(.file)){
+    obs.module <- take.gene.module(obs.stat.dt)
+    fwrite(obs.module, file = .file, sep="\t", quote=FALSE)
+}
+obs.module <- fread(.file, sep="\t", header=TRUE)
+obs.module[, c("study", "trait") := tstrsplit(gwas, split = "_")]
+
+plt <- plot.module.map(obs.sparse.module)
+print(plt)
+.file <- fig.dir %&% "/Fig_gene_module_sparse.pdf"
+.gg.save(filename = .file, plot = plt, width = 10, height = 4)
+
+plt <- plot.module.map(obs.module)
+print(plt)
+.file <- fig.dir %&% "/Fig_gene_module.pdf"
+.gg.save(filename = .file, plot = plt, width = 10, height = 4)
+```
+
+
+
+```{r fig.width = 8, fig.height = 3}
+plot.module.ct.freq <- function(.module){
+    .dt.freq <- .module[,
+                        .(ngenes = .n(hgnc_symbol)),
+                        by = .(k, celltype)]
+
+    .dt.freq[, celltype := factor(celltype, ct.order.dt$celltype)]
+
+    .dt.freq[, tot := sum(ngenes), by = .(k)]
+
+    .dt.freq[, pr := ngenes/tot, by = .(k)]
+
+    p1 <- .gg.plot(.dt.freq, aes(x = as.factor(k), y = ngenes, fill = celltype)) +
+        geom_bar(stat="identity", position = "stack") +
+        scale_fill_manual(values = ct.order.dt$hex) +
+        ylab("# genes") +
+        theme(legend.position = "top", axis.text.x = element_blank(),
+              axis.title.x = element_blank())
+
+    p2 <- .gg.plot(.dt.freq, aes(x = as.factor(k), y = pr, fill = celltype)) +
+        geom_bar(stat="identity", position = "stack") +
+        ylab("fraction") +
+        xlab("modules") +
+        scale_fill_manual(values = ct.order.dt$hex, guide = "none")
+
+    return(p1/p2)
+}
+
+plt <- plot.module.ct.freq(obs.sparse.module)
+.file <- fig.dir %&% "/Fig_gene_module_sparse_freq.pdf"
+.gg.save(filename = .file, plot = plt, width = 10, height = 3)
+
+plt <- plot.module.ct.freq(obs.module)
+.file <- fig.dir %&% "/Fig_gene_module_freq.pdf"
+.gg.save(filename = .file, plot = plt, width = 10, height = 3)
+```
+
+
+### GO enrichment for these pleiotropic modules
+
+```{r}
+.run.goseq.genes <- function(.k, .module, .within = TRUE) {
+
+    .module <- .module %>%
+        left_join(gene.info) %>%
+        na.omit
+
+    library(data.table)
+    library(tidyverse)
+    source("Util-rmd.R")
+
+    .de.ensg <- .module[k == .k, .(ensembl_gene_id)]
+    if(.within){
+        .ensg <- .module[, .(ensembl_gene_id)]
+    } else {
+        .ensg <- .eqtl.stat[, .(ensembl_gene_id)] %>% unique
+    }
+    ret <- run.goseq(.de.ensg, .ensg) %>% mutate(k = .k)
+    pkgload::unload("AnnotationDbi") # for dplyr::select
+    pkgload::unload("IRanges") # for dplyr::slice
+    return(as.data.table(ret))
+}
+
+.file <- ".result_stwas_module_go_spase.rdata"
+
+if(!file.exists(.file)){
+    go.module.sparse.tab <- 
+        lapply(unique(obs.sparse.module$k),
+               .run.goseq.genes,
+               .module = obs.sparse.module,
+               .within = FALSE) %>%
+        do.call(what = rbind)
+
+    save(go.module.sparse.tab, file = .file)
+}
+
+load(.file) # -> go.module.sparse.tab
+
+.file <- ".result_stwas_module_go.rdata"
+
+if(!file.exists(.file)){
+    go.module.tab <- 
+        lapply(unique(obs.module$k),
+               .run.goseq.genes,
+               .module = obs.module,
+               .within = FALSE) %>%
+        do.call(what = rbind)
+
+    save(go.module.tab, file = .file)
+}
+
+load(.file) # -> go.module.tab
+```
+
+```{r}
+plot.go.tab <- function(.go.tab) {
+
+    .terms <- 
+        .go.tab %>%
+        filter(numInCat >= 10) %>%
+        group_by(term) %>%
+        slice(which.min(over_represented_pvalue)) %>% 
+        ungroup() %>% 
+        arrange(over_represented_pvalue) %>%
+        head(50) %>% 
+        select(term)
+
+    .df <-
+        left_join(.terms, .go.tab) %>%
+        mutate(row = k, col = term, weight = -log10(over_represented_pvalue)) %>% 
+        col.order(.ro = 1:100, ret.tab = TRUE)
+
+    plt <-
+        .gg.plot(.df, aes(y = col, x = row, fill = weight)) +
+        geom_tile() +
+        ylab("GO terms") +
+        xlab("modules") +
+        scale_fill_distiller("p-value", palette = "PuRd", direction = 1,
+                             labels = function(x) num.sci(10^(-x)))
+
+    return(plt)
+}
+```
+
+```{r fig.width=8, fig.height = 5}
+plt <- plot.go.tab(go.module.tab)
+print(plt)
+.file <- fig.dir %&% "/Fig_gene_module_go.pdf"
+.gg.save(filename = .file, plot = plt, width = 8, height = 5)
+```
+
+```{r fig.width=8, fig.height = 5}
+plt <- plot.go.tab(go.module.sparse.tab)
+print(plt)
+.file <- fig.dir %&% "/Fig_gene_module_sparse_go.pdf"
+.gg.save(filename = .file, plot = plt, width = 8, height = 5)
+```
+
+### GWAS catalog enrichment
+
+```{r}
+.run.goseq.gwas.ct <- function(.ct, .gwas, .stat.dt, .cutoff, .catalog, ...) {
+
+    library(data.table)
+    library(tidyverse)
+    source("Util-rmd.R")
+
+    .dt <- .stat.dt[celltype %in% .ct, ]
+
+    .ensg <- .dt[,.(ensembl_gene_id)]
+
+    .de.ensg <- .dt[gwas == .gwas &
+                    lodds > .cutoff, ]
+
+    .both <-
+        run.goseq.gwas(.de.ensg[,.(ensembl_gene_id)],
+                       .gwas = .catalog, .ensg = .ensg,
+                       ...) %>%
+        dplyr::mutate(dir = "both") %>%
+        as.data.table
+
+    .pos <-
+        run.goseq.gwas(.de.ensg[sign(theta)> 0,.(ensembl_gene_id)],
+                       .gwas = .catalog, .ensg = .ensg,
+                       ...) %>%
+        dplyr::mutate(dir = "pos") %>%
+        as.data.table
+
+    .neg <-
+        run.goseq.gwas(.de.ensg[sign(theta) < 0,.(ensembl_gene_id)],
+                       .gwas = .catalog, .ensg = .ensg,
+                       ...) %>%
+        dplyr::mutate(dir = "neg") %>%
+        as.data.table
+
+    rbind(.both, .pos, .neg) %>%
+        dplyr::mutate(celltype = paste0(.ct, collapse="|")) %>%
+        as.data.table
+}
+```
+
+
+
+```{r}
+stat.dt <-
+    obs.stat.dt %>%
+    left_join(gene.info) %>%
+    na.omit
+
+cts <- unique(obs.sparse.stat.dt$celltype)
+
+for(.gwas in unique(obs.sparse.stat.dt$gwas)) {
+    .mkdir("share")
+    .file <- str_c("share/gwas_stwas_", .gwas, ".txt.gz")
+    if(!file.exists(.file)){
+        out.dt <-
+            .run.goseq.gwas.ct(cts,
+                               .gwas = .gwas,
+                               .stat.dt = stat.dt,
+                               .cutoff = 0,
+                               .catalog = gwas.catalog,
+                               use_genes_without_cat = TRUE) %>% 
+            mutate(gwas = .gwas, celltype = "all") %>%
+            as.data.table
+        fwrite(out.dt, file = .file, sep="\t", quote=FALSE)
+    }
+}
+```
+
+
+#### Summary-based TWAS can recapitulate known GWAS genes
+
+```{r}
+plot.gwas.enrichment <- function(.dt,
+                                 .cutoff = .05,
+                                 .mark = "*",
+                                 .min.cat = 5,
+                                 .max.cat = 1000,
+                                 .select.by.top = TRUE) {
+
+    .dt <-
+        .dt %>% 
+        dplyr::rename(p.val = over_represented_pvalue) %>% 
+        mutate(q.val = p.adjust(p.val, "fdr")) %>% 
+        mutate(fwer = p.adjust(p.val)) %>% 
+        filter(numInCat >= .min.cat, numInCat <= .max.cat) %>% 
+        as.data.table
+
+    if(.select.by.top){
+        .cats <- 
+            .dt %>% 
+            group_by(category) %>% 
+            slice(which.min(p.val)) %>% 
+            ungroup() %>% 
+            arrange(p.val) %>%
+            head(70) %>% 
+            dplyr::select(category) %>%
+            unique %>%
+            unlist
+    } else {
+        .cats <-
+            .dt %>%
+            group_by(gwas) %>%
+            top_n(3, -log10(p.val)) %>% 
+            ungroup() %>% 
+            dplyr::select(category) %>%
+            unique %>%
+            unlist
+    }
+
+    .gwas.show <-
+        .dt[category %in% .cats] %>%
+        mutate(row = gwas, col = category, weight = -log10(p.val)) %>% 
+        order.pair(ret.tab = TRUE)
+
+    .gwas.sig <- .gwas.show[q.val < .cutoff]
+
+    .scale.size <- scale_size_continuous("#overlapped genes",
+                                         range=c(.1,3),
+                                         labels = function(x) floor(10^x))
+
+    .scale.fill <- scale_fill_distiller("q-value",
+                                        palette = "PuRd",
+                                        direction = 1,
+                                        labels= function(x) num.sci(10^(-x)),
+                                        breaks = c(0, 2, 4))
+
+    .aes <- aes(y = row, x = col,
+                size = log10(pmax(numDEInCat,1)),
+                fill = pmin(-log10(q.val), 4))
+
+    .gg.plot(.gwas.show, .aes) +
+        ylab("TWAS traits") +
+        scale_x_discrete("GWAS catalogue traits", position = "top") +
+        .scale.fill +
+        .scale.size +
+        theme(axis.text.x = element_text(angle=90, vjust=0, hjust=0)) +
+        geom_point(pch=22, stroke = .2) +
+        geom_text(data = .gwas.sig,
+                  size=2,
+                  label=.mark,
+                  fontface="bold")
+}
+```
+
+```{r}
+gwas.enrich.dt <-
+    .list.files("share", "gwas_stwas") %>%
+    lapply(fread, header=TRUE, sep = "\t") %>% 
+    do.call(what = rbind)
+```
+
+#### Both positively and negatively associated genes
+
+```{r fig.width=8, fig.height=6}
+.dir <- "both"
+.dt <- gwas.enrich.dt[dir == .dir]
+plt <- plot.gwas.enrichment(.dt, .1, .mark = "x")
+print(plt)
+.file <- fig.dir %&% "/Fig_gwas_twas_both.pdf"
+.gg.save(filename = .file, plot = plt, width = 8, height = 6)
+```
+
+#### Positively associated genes
+
+```{r fig.width=8, fig.height=6}
+.dir <- "pos"
+.dt <- gwas.enrich.dt[dir == .dir]
+plt <- plot.gwas.enrichment(.dt, .1, .mark = "+")
+print(plt)
+.file <- fig.dir %&% "/Fig_gwas_twas_pos.pdf"
+.gg.save(filename = .file, plot = plt, width = 8, height = 6)
+```
+
+#### Negatively associated genes
+
+```{r fig.width=8, fig.height=6}
+.dir <- "neg"
+.dt <- gwas.enrich.dt[dir == .dir]
+plt <- plot.gwas.enrichment(.dt, .1, .mark = "-")
+print(plt)
+.file <- fig.dir %&% "/Fig_gwas_twas_neg.pdf"
+.gg.save(filename = .file, plot = plt, width = 8, height = 6)
+```
+
