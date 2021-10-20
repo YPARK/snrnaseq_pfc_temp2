@@ -174,7 +174,7 @@ print(plt)
 .gg.save(file = .file, plot = plt, width = 3, height = 6)
 ```
 
-### Multivariate effect size estimation captures a unique aspect of gene expression regulations
+### eQTLs identified by multivariate effect size is different from those identified by univariate analysis
 
 ```{r fig.width=3, fig.height=8}
 .gene.stat <-

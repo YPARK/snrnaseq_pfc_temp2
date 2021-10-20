@@ -1,5 +1,5 @@
 ---
-title: Cell type annotation
+title: Cell type annotation (confirm the results at the pseudobulk measurement)
 date: "`r Sys.Date()`"
 ---
 
@@ -7,97 +7,157 @@ date: "`r Sys.Date()`"
 library(tidyverse)
 library(data.table)
 source("Util-rmd.R")
+source("../Util.R")
 
 fig.dir = 'Fig/celltype/'
 dir.create(fig.dir, recursive = TRUE, showWarnings = FALSE)
 
 knitr::opts_knit$set(eval.after = 'fig.cap')
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, fig.path = fig.dir)
-knitr::opts_chunk$set(fig.width=8, fig.height=8)
+knitr::opts_chunk$set(fig.width=8, fig.height=8, results = "asis")
 options(stringsAsFactors = FALSE)
 FIG.CAP = '**Fig.**'
 ```
 
 
 ```{r}
-.col.dt <- fread("../data/brain_colors.txt")
-read.umap <- function(.file, n.max = 20000) {
 
-    .umap.dt <- fread(.file)
+.markers <-
+    fread("../result/step3/bbknn.marker_names.gz", header = FALSE) %>%
+    unlist
 
-    .sub.dt <- .umap.dt[, .SD[sample(nrow(.SD), min(nrow(.SD), n.max)),],
-                       by = .(celltype)]
+.markers.sub <-
+    .list.files("../result/step4/subtype/", "marker_names.gz") %>%
+    lapply(fread, header = FALSE) %>%
+    do.call(what = rbind) %>%
+    unlist %>%
+    unique
 
-    .col <- 
-        .sub.dt %>%
-        select(celltype) %>%
-        unique %>%
-        arrange %>%
-        left_join(.col.dt) %>%
-        select(celltype, hex) %>%
-        unique
+read.pb.dt <- function(.ct) {
 
-    .sub.dt <- .sub.dt %>%
-        mutate(ct = factor(celltype, .col$celltype))
+    .col.names <- ("../result/step5/pseudobulk/" %&% .ct %&% ".mu_cols.gz") %>%
+        fread(header=FALSE, col.names = "col") %>%
+        unlist
 
-    list(dt = .sub.dt, col = .col)
+    .row.names <- ("../result/step5/filtered/" %&% .ct %&% ".rows.gz") %>%
+        fread(header=FALSE, col.names = "row") %>%
+        unlist
+
+    .ret <- ("../result/step5/pseudobulk/" %&% .ct %&% ".mu.gz") %>%
+        fread(header=FALSE, col.names = .col.names) %>%
+        mutate(row = .row.names) %>%
+        filter(row %in% c(.markers, .markers.sub)) %>%
+        as.data.table %>%
+        melt(id.vars = "row") %>%
+        as.data.table
+
+    .ret[, c("ensg","hgnc") := tstrsplit(row, split="_")]
+    .ret[, c("projid","ct") := tstrsplit(variable, split="_")]
+
+    log.msg(.ct)
+
+    return(.ret)
 }
+
+.ct.order <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
+               "In-PV", "In-SST", "In-SV2C", "In-VIP",
+               "OPC", "Oligo", "Microglia", "Astro",
+               "Endo", "Per", "Fib", "SMC")
+
+pb.data <- lapply(.ct.order, read.pb.dt) %>%
+    do.call(what = rbind)
+
+.col.dt <- data.table(celltype = .ct.order) %>%
+    left_join(fread("../data/brain_colors.txt"))
+
+pb.data[, celltype := factor(ct, .col.dt$celltype, .col.dt$ct.name)]
 ```
 
 
-```{r Fig_umap_broad, results = "asis", fig.width=4, fig.height=4}
-.broad <- read.umap("../result/step3/bbknn.umap.gz")
+
+
+```{r}
+
+pb.sum <- pb.data[, .(x = mean(log2(.5 + value))),
+                  by = .(hgnc, ct)]
+
+pb.sum[, x := scale(`x`), by = .(hgnc)]
+
+.genes <-
+    pb.sum[order(pb.sum$x, decreasing = TRUE, na.last = TRUE),
+           head(.SD, 10),
+           by = .(ct)] %>%
+    select(hgnc, ct) %>%
+    unique %>%
+    group_by(hgnc) %>%
+    mutate(n = n()) %>%
+    ungroup %>%
+    filter(n < 2)
+
+.var.order <-
+    pb.data[, .(celltype, variable)] %>%
+    unique %>%
+    arrange(celltype, variable) %>%
+    select(variable) %>%
+    unlist
+
+.dt <-
+    pb.data[hgnc %in% .genes$hgnc]%>%
+    mutate(row = variable) %>%
+    mutate(col = hgnc) %>%
+    group_by(col) %>%
+    mutate(weight = scale(log2(.5 + value))) %>%
+    ungroup %>%
+    col.order(.ro = rev(.var.order), ret.tab=TRUE) %>%
+    as.data.table
+
+```
+
+```{r fig.width=12, fig.height=6}
+
+.cutoff <- quantile(sqrt(.dt$value), .99)
+
+.aes <- aes(y = row, x = col, fill = pmin(sqrt(value), .cutoff))
 
 plt <-
-    ggplot(.broad$dt, aes(x=UMAP1, y=UMAP2, colour=ct)) +
-    theme_void() +
-    geom_point(stroke=0, size=.5) +
-    scale_colour_manual(values = as.character(.broad$col$hex))
+    .gg.plot(.dt, .aes) +
+    theme(axis.text.x = element_text(angle=90, vjust=.5, hjust=1)) +
+    theme(strip.text.y = element_text(angle=0, hjust=0, size=6)) +
+    theme(axis.text.y = element_blank()) +
+    theme(axis.ticks.y = element_blank()) +
+    facet_grid(celltype~., scales="free", space="free") +
+    geom_tile() +
+    ylab("samples (individuals, cell types)") +
+    xlab("genes") +
+    theme(legend.position = "top") +
+    scale_fill_distiller("expression", direction = 1, palette = "Blues",
+                         labels = function(x) round(x^2))
 
 print(plt)
-.file <- fig.dir %&% "/Fig_umap_broad.pdf"
-.gg.save(.file, plot = plt, width = 4, height = 4)
+.file <- fig.dir %&% "/Fig_marker_genes_expr.pdf"
+.gg.save(file = .file, plot = plt, width = 12, height = 6)
 ```
 
+```{r fig.width=12, fig.height=6}
 
-```{r Fig_umap_vasc, results = "asis", fig.width=4, fig.height=4}
-.vasc <- read.umap("../result/step4/bbknn/Vasc.umap.gz")
-plt <-
-    ggplot(.vasc$dt, aes(x=UMAP1, y=UMAP2, colour=celltype)) +
-    theme_void() +
-    geom_point(stroke = 0, size = .5) +
-    scale_colour_manual(values = as.character(.vasc$col$hex))
+.aes <- aes(y = row, x = col, fill = pmin(pmax(weight, -2.5), 2.5))
+
+plt <- 
+    .gg.plot(.dt, .aes) +
+    theme(axis.text.x = element_text(angle=90, vjust=.5, hjust=1)) +
+    theme(strip.text.y = element_text(angle=0, hjust=0, size=6)) +
+    theme(axis.text.y = element_blank()) +
+    theme(axis.ticks.y = element_blank()) +
+    facet_grid(celltype~., scales="free", space="free") +
+    geom_tile() +
+    ylab("samples (individuals, cell types)") +
+    xlab("genes") +
+    theme(legend.position = "top") +
+    scale_fill_distiller("normalized\nexpression", direction = -1, palette = "RdBu")
 
 print(plt)
-.file <- fig.dir %&% "/Fig_umap_vasc.pdf"
-.gg.save(.file, plot = plt, width = 4, height = 4)
+.file <- fig.dir %&% "/Fig_marker_genes_expr_scaled.pdf"
+.gg.save(file = .file, plot = plt, width = 12, height = 6)
 ```
 
-
-```{r Fig_umap_ex, results = "asis", fig.width=4, fig.height=4}
-.ex <- read.umap("../result/step4/bbknn/Ex.umap.gz")
-plt <-
-    ggplot(.ex$dt, aes(x=UMAP1, y=UMAP2, colour=celltype)) +
-    theme_void() +
-    geom_point(stroke = 0, size = .5) +
-    scale_colour_manual(values = as.character(.ex$col$hex))
-
-print(plt)
-.file <- fig.dir %&% "/Fig_umap_ex.pdf"
-.gg.save(.file, plot = plt, width = 4, height = 4)
-```
-
-
-```{r Fig_umap_in, results = "asis", fig.width=4, fig.height=4}
-.in <- read.umap("../result/step4/bbknn/In.umap.gz")
-plt <-
-    ggplot(.in$dt, aes(x=UMAP1, y=UMAP2, colour=celltype)) +
-    theme_void() +
-    geom_point(stroke = 0, size = .5) +
-    scale_colour_manual(values = as.character(.in$col$hex))
-
-print(plt)
-.file <- fig.dir %&% "/Fig_umap_in.pdf"
-.gg.save(.file, plot = plt, width = 4, height = 4)
-```
 

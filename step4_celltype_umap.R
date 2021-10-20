@@ -13,7 +13,10 @@ out.file    <- argv[4] # "result/step3/bbknn.umap.gz"
 library(data.table)
 library(tidyverse)
 
-V <- fread(factor.file, header=FALSE)
+svd_d.file <- str_replace(factor.file, "factors", "svd_D")
+D <- fread(svd_d.file, header=FALSE) %>% unlist %>% as.numeric
+
+V <- fread(factor.file, header=FALSE) %>% as.matrix
 
 batch <- fread(batch.file, col.names = c("Barcode","batch"), header=FALSE)
 
@@ -25,14 +28,15 @@ annot <- fread(annot.file, col.names = .cols) %>%
 
 annot[, c("barcode","projid") := tstrsplit(Barcode,split="_")]
 
-V <- V[annot$j]
+VD <- sweep(V, 2, D, `*`)
 
-umap.mat <- uwot::umap(V,
+umap.mat <- uwot::umap(VD[annot$j, ],
+                       metric = "cosine",
                        fast_sgd = TRUE,
                        verbose = TRUE,
-                       spread = 5,
+                       spread = 3,
                        n_components = 2,
-                       n_threads = 10)
+                       n_threads = 15)
 
 colnames(umap.mat) <- paste0("UMAP", 1:ncol(umap.mat))
 

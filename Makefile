@@ -92,7 +92,6 @@ STEP3 := result/step3/marker_broad.txt.gz \
 	$(foreach t, $(BBKNN_FILES), result/step3/bbknn.$(t).gz) \
 	result/step3/bbknn.annot.gz \
 	$(foreach ct, $(BROAD_DEF), $(foreach t, mtx cols, result/step3/sorted/$(ct).$(t).gz)) \
-	result/step3/bbknn.umap.gz \
 	result/step3/celltype_stat.txt \
 	result/step3/celltype_stat.pdf \
 	result/step3/celltype_pheno_stat.txt \
@@ -151,10 +150,6 @@ result/step3/sorted/%.cols.gz: result/step3/sorted/%.mtx.gz
 # statistics #
 ##############
 
-result/step3/bbknn.umap.gz: step3_celltype_umap.R result/step1/merged.columns.gz result/step3/bbknn.annot.gz result/step3/bbknn.factors.gz
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	Rscript --vanilla $^ $@
-
 result/step3/celltype_stat.txt: step3_celltype_stat.R result/step3/bbknn.annot.gz result/step2/merged.score.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	Rscript --vanilla $^
@@ -177,9 +172,8 @@ result/step3/celltype_pheno.pdf: result/step3/celltype_pheno_stat.txt
 
 STEP4_BBKNN := $(foreach t, Ex In Vasc, $(foreach x, mtx factors svd_D svd_V svd_U cols batch, result/step4/bbknn/$(t).$(x).gz))
 STEP4_ANNOT := $(foreach t, In Ex Vasc, $(foreach s, bbknn, result/step4/subtype/$(s)_$(t).annot.gz))
-STEP4_UMAP := $(foreach t, Ex In Vasc, result/step4/bbknn/$(t).umap.gz)
 
-step4: $(STEP4_BBKNN) $(STEP4_ANNOT) $(STEP4_UMAP) result/step4/subtype.annot.gz
+step4: $(STEP4_BBKNN) $(STEP4_ANNOT) result/step4/subtype.annot.gz
 
 # % = {Ex, In}
 result/step4/bbknn/%.batch.gz: result/step3/sorted/%.cols.gz
@@ -229,10 +223,6 @@ result/step4/subtype/bbknn_%.annot.gz: result/step4/subtype/%.marker.gz $(foreac
 
 result/step4/subtype/%.label_names.gz: result/step4/subtype/%.annot.gz
 	[ -f $@ ] || exit 1
-
-result/step4/bbknn/%.umap.gz: step4_celltype_umap.R result/step1/merged.columns.gz result/step4/subtype/bbknn_%.annot.gz result/step4/bbknn/%.factors.gz
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)
-	if [ -f $@ ]; then touch $@; else Rscript --vanilla $^ $@; fi
 
 ############################
 # final annotation results #
@@ -343,10 +333,10 @@ result/step6/eqtl/data/%.bed.gz:
 result/step6/eqtl/data/%.bed.gz.tbi: result/step6/eqtl/data/%.bed.gz
 	tabix -p bed $< 
 
-
 #######################
 # run eQTL CV and PGS #
 #######################
+
 step7: jobs/step7/eqtl_sparse.jobs.gz jobs/step7/eqtl_pgs.jobs.gz
 
 CHR := $(shell seq 1 22)
