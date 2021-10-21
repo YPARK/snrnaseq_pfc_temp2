@@ -6,6 +6,7 @@
 ## PLINK.DIR      <- "data/rosmap_geno/"
 ## TEMP.DIR       <- "temp"
 ## OUT.HDR        <- "temp"
+DO.PERMUTE <- FALSE
 
 argv <- commandArgs(trailingOnly = TRUE)
 
@@ -17,6 +18,10 @@ DATA.DIR       <- argv[3]
 PLINK.DIR      <- argv[4]
 TEMP.DIR       <- argv[5]
 OUT.HDR        <- argv[6]
+
+if(length(argv) > 6){
+    DO.PERMUTE <- as.logical(argv[7])
+}
 
 ################################################################
 
@@ -163,7 +168,7 @@ read.gene.data <- function(g,
         na.omit %>%
         as.data.table
 
-    .pheno <- fread(pheno.file, na.strings = "-9") %>% 
+    .pheno <- .fread(pheno.file, na.strings = "-9") %>% 
         mutate(iid = as.character(projid)) %>%
         select(iid, np_sqrt, nft_sqrt, age_death, msex, educ) %>%
         na.omit
