@@ -24,6 +24,14 @@ source("Util-geno.R")
 library(tidyverse)
 library(data.table)
 
+out.files <- 
+    c(OUT.HDR %&% "_stat.bed.gz",
+      OUT.HDR %&% "_pheno.bed.gz")
+
+if(all(file.exists(out.files))) {
+    log.msg("files exist --> done")
+    q()
+}
 
 ################################################################
 CIS.DIST <- 1e6 # cis distance
@@ -204,7 +212,10 @@ read.gene.data <- function(g,
 .data <- read.gene.data(GENE)
 
 if(is.null(.data)) {
-    TODO
+    write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
+    write_tsv(data.frame(), OUT.HDR %&% "_pheno.bed.gz")
+    log.msg("nothing to do")
+    q()
 }
 
 ## Normalized, Sigmoid
@@ -241,7 +252,7 @@ x <- .data$x %>% as.matrix
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>% 
     dplyr::rename(y.col = .row, k.col = .col) %>% 
-    left_join(.gene.info) %>%
+    (function(x) left_join(.gene.info, x)) %>%
     left_join(.pheno.info) %>%
     as.data.table
 
@@ -260,5 +271,7 @@ out.stat <-
     as.data.table
 
 .bed.write(out.stat, OUT.HDR %&% "_stat.bed.gz")
+
+.bed.write(.right.dt, OUT.HDR %&% "_pheno.bed.gz")
 
 log.msg("done")
