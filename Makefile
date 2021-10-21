@@ -337,7 +337,7 @@ result/step6/eqtl/data/%.bed.gz.tbi: result/step6/eqtl/data/%.bed.gz
 # run eQTL CV and PGS #
 #######################
 
-step7: jobs/step7/eqtl_sparse.jobs.gz jobs/step7/eqtl_pgs.jobs.gz
+step7: jobs/step7/eqtl_sparse.jobs.gz jobs/step7/eqtl_interaction.jobs.gz jobs/step7/eqtl_pgs.jobs.gz
 
 CHR := $(shell seq 1 22)
 EXT := bed.gz bed.gz.tbi
@@ -350,6 +350,18 @@ jobs/step7/eqtl_sparse.jobs.gz:
 	mkdir -p $(TEMPDIR)
 	mkdir -p result/step7/eqtl/
 	awk -vDATA="result/step6/eqtl/data/" -vGENO="data/rosmap_geno/" -vTEMP=$(TEMPDIR) -vINFO="result/step1/gene.info.gz" -vN=$(shell gzip -cd result/step1/gene.info.gz | wc -l) -vEXE=step7_eqtl_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step7/eqtl/%05d\n", EXE, INFO, j, DATA, GENO, TEMP, j }' | gzip -c > $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N STEP7 -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
+
+jobs/step7/eqtl_interaction.jobs.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mkdir -p $(TEMPDIR)
+	mkdir -p result/step7/interaction/
+
+	awk -vDATA="result/step6/eqtl/data/" -vGENO="data/rosmap_geno/" -vTEMP=$(TEMPDIR) -vINFO="result/step1/gene.info.gz" -vN=$(shell gzip -cd result/step1/gene.info.gz | wc -l) -vEXE=step7_eqtl_pheno_interaction.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step7/interaction/%05d\n", EXE, INFO, j, DATA, GENO, TEMP, j }' | gzip -c > $@
+
+	mkdir -p result/step7/null_interaction/
+	awk -vDATA="result/step6/eqtl/data/" -vGENO="data/rosmap_geno/" -vTEMP=$(TEMPDIR) -vINFO="result/step1/gene.info.gz" -vN=$(shell gzip -cd result/step1/gene.info.gz | wc -l) -vEXE=step7_eqtl_pheno_interaction.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step7/null_interaction/%05d TRUE\n", EXE, INFO, j, DATA, GENO, TEMP, j }' | gzip -c >> $@
+
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N STEP7 -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
 jobs/step7/eqtl_pgs.jobs.gz:
