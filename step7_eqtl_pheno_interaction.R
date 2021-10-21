@@ -176,20 +176,7 @@ read.gene.data <- function(g,
         as.matrix
 
     xx <- .plink$BED[pos.df$x.pos, , drop = FALSE]
-
     yy <- t(as.matrix(.yy[, pos.df$y.pos, drop = FALSE]))
-
-    ## Total SVD for all the individuals
-    svd.tot <-
-        zqtl::take.ld.svd(.plink$BED, eigen.reg = 1e-2)
-
-    ## SVD for those who have gene expressions
-    svd.obj <- svd.tot
-    iid.tot <- x.pos.df$iid
-    svd.tot$U <- svd.tot$U[x.pos.df$x.pos, , drop = FALSE]
-
-    iid <- pos.df$iid
-    svd.obj$U <- svd.obj$U[pos.df$x.pos, , drop = FALSE]
 
     ## Deal with an empty gene
     yy <-  scale(yy)
@@ -200,10 +187,6 @@ read.gene.data <- function(g,
          y = yy,
          phi = as.matrix(pheno.dt),
          phenotypes = colnames(pheno.dt),
-         iid = iid,
-         iid.tot = iid.tot,
-         svd = svd.obj,
-         svd.tot = svd.tot,
          snp.info = .plink$BIM,
          gene.info = expr.dt[, 1:6],
          pos = pos.df)
