@@ -4,7 +4,7 @@
 ## GENE           <- 67
 ## DATA.DIR       <- "result/step6/eqtl/data/"
 ## PLINK.DIR      <- "data/rosmap_geno/"
-## TEMP.DIR       <- "temp"
+## TEMP.DIR       <- "temp/"
 ## OUT.HDR        <- "temp"
 DO.PERMUTE <- FALSE
 
@@ -40,7 +40,7 @@ if(all(file.exists(out.files))) {
 
 ################################################################
 CIS.DIST <- 1e6 # cis distance
-PHENO.FILE <- "data/ROSMAP_clinical.csv"
+PHENO.FILE <- "data/rosmap_phenotype.csv.gz"
 
 dir.create(dirname(OUT.HDR), recursive = TRUE, showWarnings = FALSE)
 TEMP.DIR <- TEMP.DIR %&% OUT.HDR
@@ -167,47 +167,38 @@ read.gene.data <- function(g,
         na.omit %>%
         as.data.table
 
-    .age.code <- function(x) {
-        if(nchar(x) == 0) return(NA)
-        if(x == "90+") return(1);
-        if(as.numeric(x) > 80) return(.5);
-        return(0)
+    .scale <- function(x, p.min = .1, p.max = .9){
+        .d <- p.max - p.min
+        ret <- (x - min(x,na.rm=TRUE))/diff(range(x,na.rm=TRUE))
+        p.min + ret * .d
     }
 
-    .ad.dx <- function(b) {
-        ret <- rep(NA, length(b))
-        ret[!is.na(b)] <- 0
-        ret[b > 3] <- 1
+    .qnorm <- function(x) {
+        .loc <- is.finite(x)
+        x.safe <- x[.loc]
+        nn <- length(x.safe)
+        qq <- qnorm((1:nn)/(nn + 1))
+        x.safe[order(x.safe)] <- qq
+        ret <- x
+        ret[.loc] <- x.safe
         return(ret)
-    }
-
-    .apoe.code <- function(x) {
-        if(is.na(x)) return(NA) 
-        if(x == 44) return(1)
-        if(x %in% c(24, 34)) return(1)
-        return(0) 
-    }
-
-    .scale <- function(x){
-        (x - min(x,na.rm=TRUE))/diff(range(x,na.rm=TRUE))
     }
 
     .pheno <- .fread(pheno.file, na.strings = "-9")
 
-    .pheno[, age.death := sapply(age_death, .age.code)]
-    .pheno[, apoe.e4 := sapply(apoe_genotype, .apoe.code)]
-    .pheno[, pathoAD := sapply(braaksc, .ad.dx)]
-    .pheno[, educ := .scale(educ)]
-    .pheno[, pmi := .scale(pmi)]
-    .pheno[, cogdx := .scale(cogdx)]
+    .pheno[, age.death := exp(.qnorm(age_death))]
+    .pheno[, np.sqrt := exp(.qnorm(np_sqrt))]
+    .pheno[, nft.sqrt := exp(.qnorm(nft_sqrt))]
+    .pheno[, cogdx := exp(.qnorm(cogn_ep_random_slope))]
+    .pheno[, apoe.e4 := .pheno$apoe4n]
 
     .pheno <- .pheno %>% 
         mutate(iid = as.character(projid)) %>%
-        select(iid, pathoAD, msex, educ, pmi, age.death, apoe.e4, cogdx)
+        select(iid, pathoAD, msex, age.death, apoe.e4, cogdx)
 
     pos.df <- pos.df[as.character(iid) %in% as.character(.pheno$iid)]
 
-    pheno.dt <-
+    phi <-
         left_join(pos.df[, .(iid)], .pheno) %>% 
         select(-iid) %>%
         as.matrix
@@ -216,14 +207,15 @@ read.gene.data <- function(g,
     yy <- t(as.matrix(.yy[, pos.df$y.pos, drop = FALSE]))
 
     ## Deal with an empty gene
-    yy <-  scale(yy)
     n.valid <- apply(is.finite(yy), 2, sum)
+    ## quantlie normalization
+    yy <- apply(yy, 2, .qnorm) %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
          y = yy,
-         phi = as.matrix(pheno.dt),
-         phenotypes = colnames(pheno.dt),
+         phi = phi,
+         phenotypes = colnames(phi),
          snp.info = .plink$BIM,
          gene.info = expr.dt[, 1:6],
          pos = pos.df)
@@ -238,8 +230,17 @@ if(is.null(.data)) {
     q()
 }
 
-opts <- list(do.hyper=FALSE, pi=0, gammax=1e3, vbiter=5000,
-             print.interv=100, out.residual=FALSE, tol = 1e-6)
+opts <- list(do.hyper=FALSE,
+             pi=-0,
+             tau=-4,
+             svd.init=TRUE,
+             jitter=1e-4,
+             gammax=1e3,
+             vbiter=5000,
+             print.interv=100,
+             out.residual=FALSE,
+             rate = 1e-2,
+             tol = 1e-6)
 
 y <- .data$y %>% as.matrix
 x <- .data$x %>% as.matrix
@@ -255,24 +256,24 @@ if(max(apply(y, 2, sd, na.rm=TRUE)) < 1e-4) {
 ## Interaction QTL analysis
 
 if(DO.PERMUTE){
-    y.perm <- y[sample(nrow(y)), , drop = FALSE]
-    x.perm <- x[sample(nrow(x)), , drop = FALSE]
-    phi.perm <- phi[sample(nrow(phi)), , drop = FALSE]
-    log.msg("Permuted genotype samples")
+
+    y.perm <- apply(y, 2, sample) %>% as.matrix
+    phi.perm <- apply(phi, 2, sample) %>% as.matrix
+    log.msg("Permuted samples in the phenotypes")
 
     .fqtl <- fqtl::fit.fqtl(y=y.perm,
-                            x.mean = x.perm,
+                            x.mean = x,
                             factored = TRUE,
                             weight.nk = phi.perm,
                             options = opts)
 
 } else {
 
-    .fqtl <- fqtl::fit.fqtl(y=y, x.mean = x,
+    .fqtl <- fqtl::fit.fqtl(y=y, x.mean=x,
                             factored = TRUE,
                             weight.nk = phi,
-                            c.mean = cbind(x, phi),
                             options = opts)
+
 }
 
 .snp.info <- .data$snp.info %>%

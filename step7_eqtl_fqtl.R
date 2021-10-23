@@ -166,12 +166,25 @@ read.gene.data <- function(g,
         na.omit %>%
         as.data.table
 
+    .qnorm <- function(x) {
+        .loc <- is.finite(x)
+        x.safe <- x[.loc]
+        nn <- length(x.safe)
+        qq <- qnorm((1:nn)/(nn + 1))
+        x.safe[order(x.safe)] <- qq
+        ret <- x
+        ret[.loc] <- x.safe
+        return(ret)
+    }
+
     xx <- .plink$BED[pos.df$x.pos, , drop = FALSE]
     yy <- t(as.matrix(.yy[, pos.df$y.pos, drop = FALSE]))
 
     ## Deal with an empty gene
-    yy <-  scale(yy)
     n.valid <- apply(is.finite(yy), 2, sum)
+
+    ## quantlie normalization
+    yy <- apply(yy, 2, .qnorm) %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
