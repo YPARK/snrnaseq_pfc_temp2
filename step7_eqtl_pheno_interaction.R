@@ -194,7 +194,7 @@ read.gene.data <- function(g,
 
     .pheno <- .pheno %>% 
         mutate(iid = as.character(projid)) %>%
-        select(iid, pathoAD, msex, age.death, apoe.e4, cogdx)
+        select(iid, pathoAD, msex, np.sqrt, nft.sqrt, age.death, apoe.e4, cogdx)
 
     pos.df <- pos.df[as.character(iid) %in% as.character(.pheno$iid)]
 
