@@ -208,8 +208,12 @@ read.gene.data <- function(g,
 
     ## Deal with an empty gene
     n.valid <- apply(is.finite(yy), 2, sum)
-    ## quantlie normalization
-    yy <- apply(yy, 2, .qnorm) %>% as.matrix
+
+    ## convert back to pseudo-counting data
+    yy <- scale(yy)
+    yy[yy > 3] <- 3
+    yy[yy < -3] <- 3
+    yy <- exp(yy) %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
@@ -236,7 +240,7 @@ opts <- list(do.hyper=FALSE,
              svd.init=TRUE,
              jitter=1e-4,
              gammax=1e3,
-             vbiter=5000,
+             vbiter=7500,
              print.interv=100,
              out.residual=FALSE,
              rate = 1e-2,
@@ -265,6 +269,7 @@ if(DO.PERMUTE){
                             x.mean = x,
                             factored = TRUE,
                             weight.nk = phi.perm,
+                            model = "nb",
                             options = opts)
 
 } else {
@@ -272,6 +277,7 @@ if(DO.PERMUTE){
     .fqtl <- fqtl::fit.fqtl(y=y, x.mean=x,
                             factored = TRUE,
                             weight.nk = phi,
+                            model = "nb",
                             options = opts)
 
 }

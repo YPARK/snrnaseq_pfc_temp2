@@ -183,8 +183,11 @@ read.gene.data <- function(g,
     ## Deal with an empty gene
     n.valid <- apply(is.finite(yy), 2, sum)
 
-    ## quantlie normalization
-    yy <- apply(yy, 2, .qnorm) %>% as.matrix
+    ## convert back to pseudo-counting data
+    yy <- scale(yy)
+    yy[yy > 3] <- 3
+    yy[yy < -3] <- -3
+    yy <- exp(yy) %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
@@ -203,8 +206,17 @@ if(is.null(.data)) {
     q()
 }
 
-opts <- list(do.hyper=FALSE, pi=0, gammax=1e3, vbiter=5000,
-             print.interv=100, out.residual=FALSE, tol = 1e-6)
+opts <- list(do.hyper=FALSE,
+             pi=-0,
+             tau=-4,
+             svd.init=TRUE,
+             jitter=1e-4,
+             gammax=1e3,
+             vbiter=7500,
+             print.interv=100,
+             out.residual=FALSE,
+             rate = 1e-2,
+             tol = 1e-6)
 
 y <- .data$y %>% as.matrix
 x <- .data$x %>% as.matrix
@@ -221,8 +233,11 @@ if(DO.PERMUTE){
     x <- x[sample(nrow(x)), , drop = FALSE]
 }
 
-.fqtl <- fqtl::fit.fqtl(y=y, x.mean = x, factored = TRUE,
+.fqtl <- fqtl::fit.fqtl(y=y,
+                        x.mean = x,
+                        factored = TRUE,
                         k=min(ncol(y), ncol(x)),
+                        model = "nb",
                         options = opts)
 
 .snp.info <- .data$snp.info %>%
