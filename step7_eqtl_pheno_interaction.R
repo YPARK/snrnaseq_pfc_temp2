@@ -31,6 +31,7 @@ library(data.table)
 
 out.files <- 
     c(OUT.HDR %&% "_stat.bed.gz",
+      OUT.HDR %&% "_geno.bed.gz",
       OUT.HDR %&% "_pheno.bed.gz")
 
 if(all(file.exists(out.files))) {
@@ -229,6 +230,7 @@ read.gene.data <- function(g,
 
 if(is.null(.data)) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
+    write_tsv(data.frame(), OUT.HDR %&% "_geno.bed.gz")
     write_tsv(data.frame(), OUT.HDR %&% "_pheno.bed.gz")
     log.msg("nothing to do")
     q()
@@ -252,6 +254,7 @@ phi <- .data$phi %>% as.matrix
 
 if(max(apply(y, 2, sd, na.rm=TRUE)) < 1e-4) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
+    write_tsv(data.frame(), OUT.HDR %&% "_geno.bed.gz")
     write_tsv(data.frame(), OUT.HDR %&% "_pheno.bed.gz")
     log.msg("Too small variance")
     q()
@@ -278,6 +281,7 @@ if(DO.PERMUTE){
                             factored = TRUE,
                             weight.nk = phi,
                             model = "nb",
+                            c.mean = cbind(x, 1),
                             options = opts)
 
 }
@@ -295,37 +299,42 @@ if(DO.PERMUTE){
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
     dplyr::rename(x.col = .row, k.col = .col) %>%
-    left_join(.snp.info) %>%
+    (function(x) left_join(.snp.info, x)) %>% 
+    dplyr::rename(`#chr` = `chr`) %>% 
     left_join(.pheno.info) %>%
+    mutate(start = snp.loc - 1) %>% 
+    mutate(stop = snp.loc) %>% 
+    arrange(`#chr`, `stop`, `pheno`) %>% 
+    dplyr::select(`#chr`, `start`, `stop`,
+                  starts_with("plink"), `pheno`,
+                  pheno, theta, theta.sd, lodds) %>% 
     as.data.table
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>% 
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
     dplyr::rename(y.col = .row, k.col = .col) %>% 
+    dplyr::select(-ends_with(".col")) %>% 
     (function(x) left_join(.gene.info, x)) %>%
     left_join(.pheno.info) %>%
     as.data.table
 
-out.stat <-
-    left_join(.left.dt, .right.dt,
-              suffix = c(".geno", ".celltype"),
-              by = c("k.col","pheno")) %>%
-    mutate(start = snp.loc - 1) %>% 
-    mutate(stop = snp.loc) %>% 
-    arrange(`#chr`, `stop`, `celltype`, `pheno`) %>% 
-    dplyr::select(`#chr`, `start`, `stop`, starts_with("plink"),
-                  ensembl_gene_id, hgnc_symbol,
-                  pheno, celltype,
-                  starts_with("theta"),
-                  starts_with("lodds")) %>%
+.cov.dt <-
+    melt.fqtl.effect(.fqtl$mean.cov) %>% 
+    rename(x.col = .row, y.col = .col) %>%
+    mutate(theta.sd = sqrt(theta.var)) %>% 
+    left_join(.snp.info) %>% 
+    na.omit %>% 
+    left_join(.gene.info) %>% 
+    mutate(start = `snp.loc` - 1) %>% 
+    mutate(stop = `snp.loc`) %>% 
+    arrange(`#chr`, `stop`) %>% 
+    select(`#chr`, `start`, `stop`, starts_with("plink"), ensembl_gene_id,
+           hgnc_symbol, celltype, theta, theta.sd, lodds) %>% 
     as.data.table
 
-.bed.write(out.stat, OUT.HDR %&% "_stat.bed.gz")
-
-out.pheno <- .right.dt %>%
-    dplyr::select(-ends_with(".col"))
-
-.bed.write(out.pheno, OUT.HDR %&% "_pheno.bed.gz")
+.bed.write(.left.dt, OUT.HDR %&% "_stat.bed.gz")
+.bed.write(.cov.dt, OUT.HDR %&% "_geno.bed.gz")
+.bed.write(.right.dt, OUT.HDR %&% "_pheno.bed.gz")
 
 log.msg("done")

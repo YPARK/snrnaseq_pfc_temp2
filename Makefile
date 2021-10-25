@@ -402,10 +402,6 @@ jobs/step7/eqtl_pgs.jobs.gz:
 	awk -vDATA="result/step6/eqtl/data/" -vGENO="data/rosmap_geno/" -vTEMP=$(TEMPDIR) -vINFO="result/step1/gene.info.gz" -vN=$(shell gzip -cd result/step1/gene.info.gz | wc -l) -vCUTOFF=0 -vEXE=step7_eqtl_pgs_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s %.2f result/step7/eqtl/%05d\n", EXE, INFO, j, DATA, GENO, TEMP, CUTOFF, j }' | gzip -c > $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N STEP7 -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
-jobs/step7/eqtl_pgs.long.gz: jobs/step7/eqtl_pgs.jobs.gz
-	gzip -cd $< | awk 'system(" ! [ -f " $$NF "_poly_sparse.bed.gz ]") == 0' | gzip > $@
-	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=16g -l h_rt=24:00:00 -b y -j y -N STEP7_EQTL -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
-
 jobs/step7/%.long.gz: jobs/step7/%.jobs.gz
 	gzip -cd $< | awk 'system("! [ -f " $$NF "_stat.bed.gz ] && ! [ -f " $$(NF-1) "_stat.bed.gz ] ") == 0' | gzip > $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=16g -l h_rt=24:00:00 -b y -j y -N STEP7_EQTL_LONG -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@

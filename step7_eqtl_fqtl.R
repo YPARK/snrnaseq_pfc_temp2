@@ -250,7 +250,14 @@ if(DO.PERMUTE){
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
     dplyr::rename(x.col = .row, k.col = .col) %>%
-    left_join(.snp.info) %>%
+    (function(x) left_join(.snp.info, x)) %>% 
+    mutate(start = snp.loc - 1) %>% 
+    mutate(stop = snp.loc) %>% 
+    dplyr::rename(`#chr` = `chr`) %>% 
+    arrange(`#chr`, `stop`, `k.col`) %>% 
+    dplyr::select(`#chr`, `start`, `stop`,
+                  starts_with("plink"), `k.col`,
+                  theta, theta.sd, lodds) %>% 
     as.data.table
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>%
@@ -262,22 +269,7 @@ if(DO.PERMUTE){
     dplyr::select(- y.col) %>% 
     as.data.table
 
-out.stat <-
-    left_join(.left.dt, .right.dt,
-              suffix = c(".geno", ".celltype"),
-              by = c("k.col")) %>%
-    mutate(start = snp.loc - 1) %>%
-    mutate(stop = snp.loc) %>%
-    dplyr::rename(k = `k.col`) %>% 
-    arrange(`#chr`, `stop`, `celltype`) %>%
-    select(`#chr`, `start`, `stop`, starts_with("plink"),
-           `ensembl_gene_id`, `hgnc_symbol`,
-           `k`, `celltype`,
-           starts_with("theta"),
-           starts_with("lodds")) %>%
-    as.data.table
-
-.bed.write(out.stat, OUT.HDR %&% "_stat.bed.gz")
+.bed.write(.left.dt, OUT.HDR %&% "_stat.bed.gz")
 
 .bed.write(.right.dt, OUT.HDR %&% "_celltype.bed.gz")
 
