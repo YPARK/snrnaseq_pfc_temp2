@@ -230,7 +230,7 @@ result/step4/subtype/%.label_names.gz: result/step4/subtype/%.annot.gz
 
 CUTOFF := .9
 
-result/step4/subtype.annot.gz: $(STEP4_ANNOT) 
+result/step4/subtype.annot.gz: $(STEP4_ANNOT)
 	cat result/step4/subtype/bbknn_*.annot.gz result/step3/bbknn.annot.gz | gzip -d | awk '$$2 != "Ex"' | awk '$$2 != "In"' | awk '$$2 != "Vasc"' | awk '$$3 > $(CUTOFF){ print $$1 FS $$2 }' | gzip -c > $@
 
 ################################################################
@@ -244,7 +244,7 @@ STEP5_PB := $(foreach t, $(SUBTYPES), $(foreach xx, $(STEP5_EXT), result/step5/p
 
 step5: $(STEP5_DATA) $(STEP5_PB)
 
-result/step5/sorted/%.select.gz: 
+result/step5/sorted/%.select.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	gzip -cd result/step4/subtype.annot.gz | awk '($$2 == "$*"){ print $$1 }' | gzip -c > $@
 
@@ -331,13 +331,13 @@ result/step6/eqtl/data/%.bed.gz:
 	cat result/step6/eqtl/data/$*/*.bed.gz | bgzip -d | awk 'NR == 1 || $$1 != "#chr"' | awk '$$2 != "NA"' | sort -k1,1 -k2,2n | bgzip -c > $@
 
 result/step6/eqtl/data/%.bed.gz.tbi: result/step6/eqtl/data/%.bed.gz
-	tabix -p bed $< 
+	tabix -p bed $<
 
 #######################
 # run eQTL CV and PGS #
 #######################
 
-step7: jobs/step7/eqtl_sparse.jobs.gz jobs/step7/eqtl_interaction.jobs.gz jobs/step7/eqtl_null_interaction.jobs.gz jobs/step7/eqtl_fqtl.jobs.gz jobs/step7/eqtl_null_fqtl.jobs.gz jobs/step7/eqtl_pgs.jobs.gz
+step7: jobs/step7/eqtl_sparse.jobs.gz jobs/step7/eqtl_interaction.jobs.gz jobs/step7/eqtl_fqtl.jobs.gz jobs/step7/eqtl_null_fqtl.jobs.gz jobs/step7/eqtl_null_sparse.jobs.gz jobs/step7/eqtl_null_interaction.jobs.gz
 
 CHR := $(shell seq 1 22)
 EXT := bed.gz bed.gz.tbi
@@ -350,6 +350,13 @@ jobs/step7/eqtl_sparse.jobs.gz:
 	mkdir -p $(TEMPDIR)
 	mkdir -p result/step7/eqtl/
 	awk -vDATA="result/step6/eqtl/data/" -vGENO="data/rosmap_geno/" -vTEMP=$(TEMPDIR) -vINFO="result/step1/gene.info.gz" -vN=$(shell gzip -cd result/step1/gene.info.gz | wc -l) -vEXE=step7_eqtl_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step7/eqtl/%05d\n", EXE, INFO, j, DATA, GENO, TEMP, j }' | gzip -c > $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N STEP7 -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
+
+jobs/step7/eqtl_null_sparse.jobs.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
+	mkdir -p $(TEMPDIR)
+	mkdir -p result/step7/null_eqtl/
+	awk -vDATA="result/step6/eqtl/data/" -vGENO="data/rosmap_geno/" -vTEMP=$(TEMPDIR) -vINFO="result/step1/gene.info.gz" -vN=$(shell gzip -cd result/step1/gene.info.gz | wc -l) -vEXE=step7_eqtl_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step7/null_eqtl/%05d TRUE\n", EXE, INFO, j, DATA, GENO, TEMP, j }' | gzip -c > $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N STEP7 -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
 jobs/step7/eqtl_interaction.jobs.gz:
@@ -407,7 +414,7 @@ result/step7/chr%_stat.bed.gz:
 	find result/step7/eqtl -name '*stat.bed.gz' -type f -exec gzip -cd {} + | awk 'NR == 1 { print $$0 } (NR > 1 && $$1 == $*) { printf("%d\t%d\t%d", $$1, $$2, $$3); for(j=4; j<=NF; ++j) printf "\t" $$j; printf "\n"; }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
 
 result/step7/%.bed.gz.tbi: result/step7/%.bed.gz
-	tabix -p bed $< 
+	tabix -p bed $<
 
 result/step7/chr%_poly.bed.gz:
 	find result/step7/eqtl -name '*poly.bed.gz' -type f -exec gzip -cd {} + | awk 'NR == 1 { print $$0 } (NR > 1 && $$1 == $*) { printf("%d\t%d\t%d", $$1, $$2, $$3); for(j=4; j<=NF; ++j) printf "\t" $$j; printf "\n"; }' | sort -k1,1 -k2,2n --parallel=8 -S 8G | bgzip -c > $@
@@ -433,13 +440,13 @@ step8: $(foreach gwas, $(GWAS), jobs/step8/subset_$(gwas).jobs.gz)
 
 step8_long: $(foreach gwas, $(GWAS), jobs/step8/subset_$(gwas).long.gz)
 
-step8_combine: $(foreach gwas, $(GWAS), docs/share/pgs/$(gwas).txt.gz)     
+step8_combine: $(foreach gwas, $(GWAS), docs/share/pgs/$(gwas).txt.gz)
 
-docs/share/pgs/%.txt.gz:                                                   
-	[ -d $(dir $@) ] || mkdir -p $(dir $@)                                 
+docs/share/pgs/%.txt.gz:
+	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	gzip -cd result/step8/subset/$*/*.bed.gz | awk '!/#CHR/{ k = $$7 FS $$8 FS $$9 FS $$5; data[k] += $$6 } END { for(k in data) print k FS data[k] }' | gzip -c > $@
 
-jobs/step8/subset_%.jobs.gz: data/GWAS/%.bed.gz 
+jobs/step8/subset_%.jobs.gz: data/GWAS/%.bed.gz
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	mkdir -p result/step8/$*/
 	awk -vLDFILE=$(LDFILE) -vDATA="data/GWAS/$*.bed.gz" -vGENO="data/rosmap_geno/" -vEQTL="result/step7/" -vTEMP="$(TEMPDIR)/gwas/$*" -vN=$(NLD) -vEXE=step8_gwas_pgs_subset.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s %s result/step8/subset/$*/%04d.bed.gz\n", EXE, LDFILE, j, DATA, GENO, EQTL, (TEMP "_" j), j }' | gzip -c > $@
@@ -464,19 +471,19 @@ step9_long: $(foreach tt, joint sparse celltype, $(foreach gwas, $(GWAS), jobs/s
 
 step9_post: $(foreach jc, joint sparse celltype, $(foreach on, obs null, $(foreach gwas, $(GWAS), result/step9/$(jc).$(on).$(gwas).stat.gz)))
 
-jobs/step9/joint_%.jobs.gz: 
+jobs/step9/joint_%.jobs.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/joint/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
-jobs/step9/sparse_%.jobs.gz: 
+jobs/step9/sparse_%.jobs.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/sparse/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_joint_sparse.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/sparse/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N $* -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
-jobs/step9/celltype_%.jobs.gz: 
+jobs/step9/celltype_%.jobs.gz:
 	[ -d $(dir $@) ] || mkdir -p $(dir $@)
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_celltype.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/celltype/obs/$*/%04d FALSE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c > $@
 	awk -vLDFILE=$(LDFILE) -vGWAS="$*" -vGDIR="result/step8/subset" -vEQTL="result/step7/" -vN=$(NLD) -vEXE=step9_gwas_pgs_twas_celltype.R 'BEGIN{ for(j=1; j<=N; ++j) printf "Rscript --vanilla %s %s %d %s %s %s result/step9/celltype/null/$*/%04d TRUE\n", EXE, LDFILE, j, GWAS, GDIR, EQTL, j }' | gzip -c >> $@

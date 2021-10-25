@@ -6,10 +6,11 @@
 ## PLINK.DIR      <- "data/rosmap_geno/"
 ## TEMP.DIR       <- "temp"
 ## OUT.HDR        <- "temp"
+DO.PERMUTE <- FALSE
 
 argv <- commandArgs(trailingOnly = TRUE)
 
-if(length(argv) != 6) q()
+if(length(argv) < 6) q()
 
 GENE.INFO.FILE <- argv[1]
 GENE           <- as.integer(argv[2])
@@ -18,14 +19,16 @@ PLINK.DIR      <- argv[4]
 TEMP.DIR       <- argv[5]
 OUT.HDR        <- argv[6]
 
+if(length(argv) > 6){
+    DO.PERMUTE <- as.logical(argv[7])
+}
+
 ################################################################
 source("Util-geno.R")
 library(tidyverse)
 library(data.table)
 
-out.files <- 
-    c(OUT.HDR %&% "_stat.bed.gz",
-      OUT.HDR %&% "_poly.bed.gz")
+out.files <- OUT.HDR %&% "_stat.bed.gz"
 
 if(all(file.exists(out.files))) {
     log.msg("files exist --> done")
@@ -71,46 +74,6 @@ dir.create(TEMP.DIR, recursive = TRUE, showWarnings = FALSE)
     Rsamtools::bgzip(out.tsv.file, dest=out.file)
     Rsamtools::indexTabix(out.file, format="bed")
     unlink(out.tsv.file)
-}
-
-#' @param k.select
-#' @param .svd
-#' @param z.dt
-.pgs.rank <- function(k.select, .svd, z.dt) {
-    zz <- z.dt %>% select(-x.col) %>% as.matrix
-    y.col <- colnames(zz)
-    if(length(k.select) < 1) {
-        y.hat <- matrix(0, nrow=nrow(.svd$U), ncol=1)
-        return(y.hat)
-    }
-
-    dd <- .svd$D[k.select]
-    y.hat <- 
-        sweep(.svd$U[, k.select, drop = FALSE], MARGIN=2, STATS=dd, FUN=`/`) %*%
-        (.svd$V.t[k.select, z.dt$x.col, drop = FALSE]) %*%
-        zz
-    colnames(y.hat) <- y.col
-    return(y.hat)
-}
-
-#' @param .svd
-#' @param max.K
-run.varimax <- function(.svd, max.K) {
-    V <- t(.svd$V.t)
-
-    max.K <- min(ncol(V), max.K)
-
-    if(max.K < 1) return(NULL)
-
-    dd <- .svd$D[1:max.K, , drop = FALSE]
-    V <- V[, 1:max.K, drop = FALSE]
-    .vm <- varimax(V, eps = 1e-4, normalize=FALSE)
-
-    R <- .vm$rotmat
-    U <- .svd$U[, 1:max.K, drop = FALSE] %*% R
-    V <- V %*% R
-
-    list(U = U, D = dd, V = V, V.t = t(V))
 }
 
 #' @param yy
@@ -219,30 +182,21 @@ read.gene.data <- function(g, data.dir = DATA.DIR, gene.info = GENE.INFO, temp.d
 
     yy <- t(as.matrix(.yy[, pos.df$y.pos, drop = FALSE]))
 
-    ## Total SVD for all the individuals
-    svd.tot <-
-        zqtl::take.ld.svd(.plink$BED, eigen.reg = 1e-2) %>%
-        run.varimax(max.K = 300)
-
-    ## SVD for those who have gene expressions
-    svd.obj <- svd.tot
-    iid.tot <- x.pos.df$iid
-    svd.tot$U <- svd.tot$U[x.pos.df$x.pos, , drop = FALSE]
-
     iid <- pos.df$iid
-    svd.obj$U <- svd.obj$U[pos.df$x.pos, , drop = FALSE]
 
     ## Deal with an empty gene
-    yy <-  scale(yy)
     n.valid <- apply(is.finite(yy), 2, sum)
+
+    ## convert back to pseudo-counting data
+    yy <- scale(yy)
+    yy[yy > 3] <- 3
+    yy[yy < -3] <- 3
+    yy <- exp(yy) %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
          y = yy,
          iid = iid,
-         iid.tot = iid.tot,
-         svd = svd.obj,
-         svd.tot = svd.tot,
          snp.info = .plink$BIM,
          gene.info = expr.dt[, 1:6],
          pos = pos.df)
@@ -252,113 +206,52 @@ read.gene.data <- function(g, data.dir = DATA.DIR, gene.info = GENE.INFO, temp.d
 
 if(is.null(.data)) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
-    write_tsv(data.frame(), OUT.HDR %&% "_poly.bed.gz")
     log.msg("nothing to do")
     q()
 }
 
-U <- scale(.data$svd$U)
 y <- .data$y
 x <- .data$x
 
-#################################
-## select relevant SVD factors ##
-#################################
-
-opts <- list(do.hyper=FALSE, pi=0, gammax=1e3, vbiter=5000,
-             print.interv=100, out.residual=FALSE, tol = 1e-6)
-
-.fit <- fqtl::fit.fqtl(y, U, options = opts)
-.fqtl.dt <- melt.fqtl.effect(.fit$mean)
-
-.stat <-
-    zqtl::calc.qtl.stat(.data$x, .data$y) %>% 
-    mutate(z = beta / se) %>%
-    na.omit
-
-##################################
-## polygenic prediction results ##
-##################################
-
-.gene.info <- .data$gene.info %>%
-    mutate(y.col = 1:n())
-
-svd.obj <- .data$svd
-svd.tot <- .data$svd.tot
-
-iid.tot <- .data$iid.tot
-out.hat <- tibble()
-
-.cutoff <- (log(.1) - log(.9))
-
-.temp <- .fqtl.dt %>%
-    group_by(.col) %>%
-    slice(which.max(lodds)) %>%
-    ungroup %>%
-    filter(lodds > .cutoff)
-
-for(g in .temp$.col) {
-
-    k.g <-
-        .fqtl.dt %>%
-        filter(.col == g) %>%
-        filter(lodds > .cutoff) %>%
-        select(.row) %>%
-        unlist
-
-    y.g <- .data$y[, g]
-
-    zz.g <- .stat %>% 
-        filter(y.col == g) %>% 
-        as.data.table %>% 
-        dcast(x.col ~ y.col,
-              value.var = "z",
-              fun.aggregate = mean)
-
-    y.hat.g <- .pgs.rank(k.g, svd.obj, zz.g)
-
-    ## compute PVE
-    .hat.g <- predict(lm(y.g ~ y.hat.g))
-    pve.g <- var(.hat.g, na.rm=TRUE) / var(y.g, na.rm=TRUE)
-
-    ## PVE bootstrap
-    pve.boot.g <-
-        sapply(1:200,
-               function(b) {
-                   .idx <- sample(length(y.g), length(y.g), replace=TRUE)
-                   .hat.boot <- predict(lm(y.g[.idx] ~ y.hat.g[.idx]))
-                   .boot <- var(.hat.boot, na.rm=TRUE) / var(y.g, na.rm=TRUE)
-               })
-    
-    ## compute total PGS
-    y.hat.g <- .pgs.rank(k.g, svd.tot, zz.g) %>%
-        unlist %>%
-        as.numeric
-
-    out.g <- tibble(iid = iid.tot,
-                    yhat = y.hat.g,
-                    pve = pve.g,
-                    pve.sd = sd(pve.boot.g),
-                    y.col = g)
-
-    out.hat <- rbind(out.hat, out.g)
+if(DO.PERMUTE){
+    y <- apply(y, 2, sample)
 }
 
-out.hat <-
-    left_join(.gene.info, out.hat) %>%
-    select(-y.col) %>%
-    as.data.table
+.qnorm <- function(x) {
+    .loc <- is.finite(x)
+    x.safe <- x[.loc]
+    nn <- length(x.safe)
+    qq <- qnorm((1:nn)/(nn + 1))
+    x.safe[order(x.safe)] <- qq
+    ret <- x
+    ret[.loc] <- x.safe
+    return(ret)
+}
 
-.bed.write(out.hat, OUT.HDR %&% "_poly.bed.gz")
+y.qnorm <- apply(y, 2, .qnorm)
+
+.stat <-
+    zqtl::calc.qtl.stat(x, y.qnorm) %>% 
+    mutate(z = beta / se) %>%
+    na.omit
 
 #########################################
 ## marginal and sparse eQTL statistics ##
 #########################################
 
-opts <- list(do.hyper=FALSE, pi=0, gammax=1e3, vbiter=5000,
-             print.interv=100, out.residual=FALSE, tol = 1e-6)
+opts <- list(do.hyper=FALSE,
+             pi=-0,
+             tau=-4,
+             svd.init=TRUE,
+             jitter=1e-4,
+             gammax=1e3,
+             vbiter=7500,
+             print.interv=100,
+             out.residual=FALSE,
+             rate = 1e-2,
+             tol = 1e-6)
 
-.fit <- fqtl::fit.fqtl(y, x, options = opts)
+.fit <- fqtl::fit.fqtl(y, x, model = "nb", options = opts)
 
 .sparse.dt <- melt.fqtl.effect(.fit$mean) %>%
     rename(x.col = .row, y.col = .col) %>%

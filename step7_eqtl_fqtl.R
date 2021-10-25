@@ -247,13 +247,19 @@ if(DO.PERMUTE){
     mutate(y.col = 1:n())
 
 .left.dt <- melt.fqtl.effect(.fqtl$mean.left) %>%
+    mutate(theta.sd = sqrt(theta.var)) %>% 
+    dplyr::select(-theta.var) %>% 
     dplyr::rename(x.col = .row, k.col = .col) %>%
     left_join(.snp.info) %>%
     as.data.table
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>%
+    mutate(theta.sd = sqrt(theta.var)) %>% 
+    dplyr::select(-theta.var) %>% 
     dplyr::rename(y.col = .row, k.col = .col) %>%
     (function(x) left_join(.gene.info, x)) %>%
+    dplyr::rename(k = `k.col`) %>% 
+    dplyr::select(- y.col) %>% 
     as.data.table
 
 out.stat <-
@@ -262,10 +268,11 @@ out.stat <-
               by = c("k.col")) %>%
     mutate(start = snp.loc - 1) %>%
     mutate(stop = snp.loc) %>%
+    dplyr::rename(k = `k.col`) %>% 
     arrange(`#chr`, `stop`, `celltype`) %>%
     select(`#chr`, `start`, `stop`, starts_with("plink"),
-           ensembl_gene_id, hgnc_symbol,
-           celltype,
+           `ensembl_gene_id`, `hgnc_symbol`,
+           `k`, `celltype`,
            starts_with("theta"),
            starts_with("lodds")) %>%
     as.data.table

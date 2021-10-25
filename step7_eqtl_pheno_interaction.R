@@ -292,12 +292,16 @@ if(DO.PERMUTE){
     mutate(k.col = 1:n())
 
 .left.dt <- melt.fqtl.effect(.fqtl$mean.left) %>%
+    mutate(theta.sd = sqrt(theta.var)) %>% 
+    dplyr::select(-theta.var) %>% 
     dplyr::rename(x.col = .row, k.col = .col) %>%
     left_join(.snp.info) %>%
     left_join(.pheno.info) %>%
     as.data.table
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>% 
+    mutate(theta.sd = sqrt(theta.var)) %>% 
+    dplyr::select(-theta.var) %>% 
     dplyr::rename(y.col = .row, k.col = .col) %>% 
     (function(x) left_join(.gene.info, x)) %>%
     left_join(.pheno.info) %>%
