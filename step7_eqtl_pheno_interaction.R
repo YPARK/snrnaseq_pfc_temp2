@@ -273,6 +273,7 @@ if(DO.PERMUTE){
                             factored = TRUE,
                             weight.nk = phi.perm,
                             model = "nb",
+                            c.mean = cbind(x, 1),
                             options = opts)
 
 } else {
@@ -314,9 +315,9 @@ if(DO.PERMUTE){
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
     dplyr::rename(y.col = .row, k.col = .col) %>% 
-    dplyr::select(-ends_with(".col")) %>% 
     (function(x) left_join(.gene.info, x)) %>%
     left_join(.pheno.info) %>%
+    dplyr::select(-ends_with(".col")) %>% 
     as.data.table
 
 .cov.dt <-
