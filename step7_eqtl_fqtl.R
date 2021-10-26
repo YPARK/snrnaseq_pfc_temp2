@@ -184,10 +184,7 @@ read.gene.data <- function(g,
     n.valid <- apply(is.finite(yy), 2, sum)
 
     ## convert back to pseudo-counting data
-    yy <- scale(yy)
-    yy[yy > 3] <- 3
-    yy[yy < -3] <- -3
-    yy <- exp(yy) %>% as.matrix
+    yy <- scale(yy) %>% exp() %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
@@ -206,16 +203,17 @@ if(is.null(.data)) {
     q()
 }
 
-opts <- list(do.hyper=FALSE,
-             pi=-0,
-             tau=-4,
-             svd.init=TRUE,
-             jitter=1e-4,
-             gammax=1e3,
-             vbiter=7500,
-             print.interv=100,
-             out.residual=FALSE,
+opts <- list(do.hyper = TRUE,
+             svd.init = TRUE,
+             jitter = 0,
+             pi.ub = log(.9/.1),
+             pi.lb = log(.1/.9),
+             gammax = 1e3,
+             vbiter = 3500,
+             print.interv = 100,
+             out.residual = FALSE,
              rate = 1e-2,
+             decay = 0,
              tol = 1e-6)
 
 y <- .data$y %>% as.matrix
@@ -246,6 +244,9 @@ if(DO.PERMUTE){
 .gene.info <- .data$gene.info %>%
     mutate(y.col = 1:n())
 
+.ensg <- unique(.gene.info$ensembl_gene_id)
+.hgnc <- unique(.gene.info$hgnc_symbol)
+
 .left.dt <- melt.fqtl.effect(.fqtl$mean.left) %>%
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
@@ -254,9 +255,11 @@ if(DO.PERMUTE){
     mutate(start = snp.loc - 1) %>% 
     mutate(stop = snp.loc) %>% 
     dplyr::rename(`#chr` = `chr`) %>% 
+    mutate(ensembl_gene_id = .ensg, hgnc_symbol = .hgnc) %>% 
     arrange(`#chr`, `stop`, `k.col`) %>% 
     dplyr::select(`#chr`, `start`, `stop`,
                   starts_with("plink"), `k.col`,
+                  `ensembl_gene_id`, `hgnc_symbol`,
                   theta, theta.sd, lodds) %>% 
     as.data.table
 

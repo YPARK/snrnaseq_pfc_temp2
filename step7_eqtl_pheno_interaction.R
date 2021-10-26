@@ -31,7 +31,6 @@ library(data.table)
 
 out.files <- 
     c(OUT.HDR %&% "_stat.bed.gz",
-      OUT.HDR %&% "_geno.bed.gz",
       OUT.HDR %&% "_pheno.bed.gz")
 
 if(all(file.exists(out.files))) {
@@ -204,17 +203,14 @@ read.gene.data <- function(g,
         select(-iid) %>%
         as.matrix
 
-    xx <- scale(.plink$BED[pos.df$x.pos, , drop = FALSE])
+    xx <- .plink$BED[pos.df$x.pos, , drop = FALSE]
     yy <- t(as.matrix(.yy[, pos.df$y.pos, drop = FALSE]))
 
     ## Deal with an empty gene
     n.valid <- apply(is.finite(yy), 2, sum)
 
     ## convert back to pseudo-counting data
-    yy <- scale(yy)
-    yy[yy > 3] <- 3
-    yy[yy < -3] <- 3
-    yy <- exp(yy) %>% as.matrix
+    yy <- scale(yy) %>% exp() %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
@@ -230,22 +226,22 @@ read.gene.data <- function(g,
 
 if(is.null(.data)) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
-    write_tsv(data.frame(), OUT.HDR %&% "_geno.bed.gz")
     write_tsv(data.frame(), OUT.HDR %&% "_pheno.bed.gz")
     log.msg("nothing to do")
     q()
 }
 
-opts <- list(do.hyper=FALSE,
-             pi=-0,
-             tau=-4,
-             svd.init=TRUE,
-             jitter=1e-4,
-             gammax=1e3,
-             vbiter=7500,
-             print.interv=100,
-             out.residual=FALSE,
+opts <- list(do.hyper = TRUE,
+             svd.init = TRUE,
+             jitter = 0,
+             pi.ub = log(.9/.1),
+             pi.lb = log(.1/.9),
+             gammax = 1e3,
+             vbiter = 3500,
+             print.interv = 100,
+             out.residual = FALSE,
              rate = 1e-2,
+             decay = 0,
              tol = 1e-6)
 
 y <- .data$y %>% as.matrix
@@ -254,7 +250,6 @@ phi <- .data$phi %>% as.matrix
 
 if(max(apply(y, 2, sd, na.rm=TRUE)) < 1e-4) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
-    write_tsv(data.frame(), OUT.HDR %&% "_geno.bed.gz")
     write_tsv(data.frame(), OUT.HDR %&% "_pheno.bed.gz")
     log.msg("Too small variance")
     q()
@@ -268,21 +263,20 @@ if(DO.PERMUTE){
     phi.perm <- apply(phi, 2, sample) %>% as.matrix
     log.msg("Permuted samples in the phenotypes")
 
-    .fqtl <- fqtl::fit.fqtl(y=y.perm,
+    .fqtl <- fqtl::fit.fqtl(y = y.perm,
                             x.mean = x,
                             factored = TRUE,
                             weight.nk = phi.perm,
                             model = "nb",
-                            c.mean = cbind(x, 1),
                             options = opts)
 
 } else {
 
-    .fqtl <- fqtl::fit.fqtl(y=y, x.mean=x,
+    .fqtl <- fqtl::fit.fqtl(y = y,
+                            x.mean = x,
                             factored = TRUE,
                             weight.nk = phi,
                             model = "nb",
-                            c.mean = cbind(x, 1),
                             options = opts)
 
 }
@@ -296,6 +290,9 @@ if(DO.PERMUTE){
 .pheno.info <- data.table(pheno = .data$phenotypes) %>% 
     mutate(k.col = 1:n())
 
+.ensg <- unique(.gene.info$ensembl_gene_id)
+.hgnc <- unique(.gene.info$hgnc_symbol)
+
 .left.dt <- melt.fqtl.effect(.fqtl$mean.left) %>%
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
@@ -306,9 +303,11 @@ if(DO.PERMUTE){
     mutate(start = snp.loc - 1) %>% 
     mutate(stop = snp.loc) %>% 
     arrange(`#chr`, `stop`, `pheno`) %>% 
+    mutate(ensembl_gene_id = .ensg, hgnc_symbol = .hgnc) %>% 
     dplyr::select(`#chr`, `start`, `stop`,
                   starts_with("plink"), `pheno`,
-                  pheno, theta, theta.sd, lodds) %>% 
+                  `ensembl_gene_id`, `hgnc_symbol`,
+                  theta, theta.sd, lodds) %>% 
     as.data.table
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>% 
@@ -320,22 +319,7 @@ if(DO.PERMUTE){
     dplyr::select(-ends_with(".col")) %>% 
     as.data.table
 
-.cov.dt <-
-    melt.fqtl.effect(.fqtl$mean.cov) %>% 
-    rename(x.col = .row, y.col = .col) %>%
-    mutate(theta.sd = sqrt(theta.var)) %>% 
-    left_join(.snp.info) %>% 
-    na.omit %>% 
-    left_join(.gene.info) %>% 
-    mutate(start = `snp.loc` - 1) %>% 
-    mutate(stop = `snp.loc`) %>% 
-    arrange(`#chr`, `stop`) %>% 
-    select(`#chr`, `start`, `stop`, starts_with("plink"), ensembl_gene_id,
-           hgnc_symbol, celltype, theta, theta.sd, lodds) %>% 
-    as.data.table
-
 .bed.write(.left.dt, OUT.HDR %&% "_stat.bed.gz")
-.bed.write(.cov.dt, OUT.HDR %&% "_geno.bed.gz")
 .bed.write(.right.dt, OUT.HDR %&% "_pheno.bed.gz")
 
 log.msg("done")

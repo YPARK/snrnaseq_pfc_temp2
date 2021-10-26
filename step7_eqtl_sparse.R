@@ -188,10 +188,7 @@ read.gene.data <- function(g, data.dir = DATA.DIR, gene.info = GENE.INFO, temp.d
     n.valid <- apply(is.finite(yy), 2, sum)
 
     ## convert back to pseudo-counting data
-    yy <- scale(yy)
-    yy[yy > 3] <- 3
-    yy[yy < -3] <- 3
-    yy <- exp(yy) %>% as.matrix
+    yy <- scale(yy) %>% exp() %>% as.matrix
     yy[, n.valid < 10] <- 0
 
     list(x = xx,
@@ -239,19 +236,23 @@ y.qnorm <- apply(y, 2, .qnorm)
 ## marginal and sparse eQTL statistics ##
 #########################################
 
-opts <- list(do.hyper=FALSE,
-             pi=-0,
-             tau=-4,
-             svd.init=TRUE,
-             jitter=1e-4,
-             gammax=1e3,
-             vbiter=7500,
-             print.interv=100,
-             out.residual=FALSE,
+opts <- list(do.hyper = TRUE,
+             svd.init = TRUE,
+             jitter = 0,
+             pi.ub = 0,
+             pi.lb = log(.1/.9),
+             gammax = 1e3,
+             vbiter = 3500,
+             print.interv = 100,
+             out.residual = FALSE,
              rate = 1e-2,
+             decay = 0,
              tol = 1e-6)
 
-.fit <- fqtl::fit.fqtl(y, x, model = "nb", options = opts)
+.fit <- fqtl::fit.fqtl(y = y,
+                       x.mean = x,
+                       model = "nb",
+                       options = opts)
 
 .sparse.dt <- melt.fqtl.effect(.fit$mean) %>%
     rename(x.col = .row, y.col = .col) %>%
@@ -263,6 +264,13 @@ opts <- list(do.hyper=FALSE,
 .snp.info <- .data$snp.info %>%
     mutate(x.col = 1:n())
 
+.maf <-
+    data.table(maf.1 = apply(x, 2, mean),
+               maf.2 = apply(2 - x, 2, mean)) %>%
+    mutate(maf = pmin(maf.1, maf.2)/2) %>%
+    mutate(x.col =1:n()) %>%
+    select(maf, x.col)
+
 out.stat <-
     .stat %>%
     left_join(.snp.info) %>% 
@@ -270,8 +278,12 @@ out.stat <-
     left_join(.sparse.dt) %>% 
     mutate(start = snp.loc - 1) %>% 
     mutate(stop = snp.loc) %>% 
+    left_join(.maf) %>% 
     arrange(`#chr`, `stop`) %>% 
-    select(`#chr`, `start`, `stop`, starts_with("plink"), ensembl_gene_id, hgnc_symbol, celltype, beta, se, p.val, n, theta, theta.sd, lodds) %>% 
+    select(`#chr`, `start`, `stop`, starts_with("plink"),
+           ensembl_gene_id, hgnc_symbol, celltype,
+           beta, se, p.val, n, maf,
+           theta, theta.sd, lodds) %>% 
     as.data.table
 
 .bed.write(out.stat, OUT.HDR %&% "_stat.bed.gz")
