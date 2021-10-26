@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 ## GENE.INFO.FILE <- "result/step1/gene.info.gz"
-## GENE           <- 2
+## GENE           <- 67
 ## DATA.DIR       <- "result/step6/eqtl/data/"
 ## PLINK.DIR      <- "data/rosmap_geno/"
 ## TEMP.DIR       <- "temp"
@@ -36,8 +36,7 @@ if(all(file.exists(out.files))) {
 }
 
 ################################################################
-CIS.DIST <- 1e6 # cis distance
-NCV      <- 7 # number of cross validation
+CIS.DIST <- 7e5 # cis distance
 
 dir.create(dirname(OUT.HDR), recursive = TRUE, showWarnings = FALSE)
 TEMP.DIR <- TEMP.DIR %&% OUT.HDR
@@ -207,8 +206,27 @@ if(is.null(.data)) {
     q()
 }
 
+svd.knockoff <- function(x){
+    .svd <- zqtl::take.ld.svd(x, eigen.tol = 0, eigen.reg = 0)    
+
+    uu <- .svd$U
+    .offset <- sample(ncol(uu), 1)
+    .col <- seq(.offset, ncol(uu) + .offset - 1) %% ncol(uu) + 1
+    uu.ko <- uu[, .col, drop = FALSE]
+
+    xx <- (sweep(uu, 2, .svd$D, `*`) %*% .svd$V.t) %>%
+        scale
+
+    xx.ko <- (sweep(uu.ko, 2, .svd$D, `*`) %*% .svd$V.t) %>%
+        scale
+
+    list(x = xx, ko = xx.ko)
+}
+
 y <- .data$y
-x <- .data$x
+.ko <- svd.knockoff(.data$x)
+x <- .ko$x
+x.ko <- .ko$ko
 
 if(DO.PERMUTE){
     y <- apply(y, 2, sample)
@@ -251,12 +269,22 @@ opts <- list(do.hyper = TRUE,
 
 .fit <- fqtl::fit.fqtl(y = y,
                        x.mean = x,
+                       c.mean = x.ko,
                        model = "nb",
                        options = opts)
 
 .sparse.dt <- melt.fqtl.effect(.fit$mean) %>%
     rename(x.col = .row, y.col = .col) %>%
     mutate(theta.sd = sqrt(theta.var))
+
+.ko.dt <- melt.fqtl.effect(.fit$mean.cov) %>%
+    rename(x.col = .row, y.col = .col) %>%
+    mutate(theta.sd = sqrt(theta.var))
+
+.sparse.dt <- .sparse.dt %>%
+    left_join(.ko.dt,
+              by = c("x.col", "y.col"),
+              suffix = c("", ".ko"))
 
 .gene.info <- .data$gene.info %>%
     mutate(y.col = 1:n())
@@ -283,7 +311,8 @@ out.stat <-
     select(`#chr`, `start`, `stop`, starts_with("plink"),
            ensembl_gene_id, hgnc_symbol, celltype,
            beta, se, p.val, n, maf,
-           theta, theta.sd, lodds) %>% 
+           theta, theta.sd, lodds,
+           theta.ko, theta.sd.ko, lodds.ko) %>% 
     as.data.table
 
 .bed.write(out.stat, OUT.HDR %&% "_stat.bed.gz")

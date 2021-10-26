@@ -39,7 +39,7 @@ if(all(file.exists(out.files))) {
 }
 
 ################################################################
-CIS.DIST <- 1e6 # cis distance
+CIS.DIST <- 7e5 # cis distance
 
 dir.create(dirname(OUT.HDR), recursive = TRUE, showWarnings = FALSE)
 TEMP.DIR <- TEMP.DIR %&% OUT.HDR
@@ -205,8 +205,8 @@ if(is.null(.data)) {
 
 opts <- list(do.hyper = TRUE,
              svd.init = TRUE,
-             jitter = 0,
-             pi.ub = log(.9/.1),
+             jitter = 1e-4,
+             pi.ub = 0,
              pi.lb = log(.1/.9),
              gammax = 1e3,
              vbiter = 3500,
@@ -217,7 +217,23 @@ opts <- list(do.hyper = TRUE,
              tol = 1e-6)
 
 y <- .data$y %>% as.matrix
-x <- .data$x %>% as.matrix
+
+svd.knockoff <- function(x){
+    .svd <- zqtl::take.ld.svd(x, eigen.tol = 0, eigen.reg = 0)    
+
+    uu <- .svd$U
+    .offset <- sample(ncol(uu), 1)
+    .col <- seq(.offset, ncol(uu) + .offset - 1) %% ncol(uu) + 1
+    uu.ko <- uu[, .col, drop = FALSE]
+
+    xx <- (sweep(uu, 2, .svd$D, `*`) %*% .svd$V.t) %>%
+        scale
+
+    xx.ko <- (sweep(uu.ko, 2, .svd$D, `*`) %*% .svd$V.t) %>%
+        scale
+
+    list(x = xx, ko = xx.ko)
+}
 
 if(max(apply(y, 2, sd, na.rm=TRUE)) < 1e-4) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
@@ -226,41 +242,63 @@ if(max(apply(y, 2, sd, na.rm=TRUE)) < 1e-4) {
     q()
 }
 
+.ko <- svd.knockoff(.data$x)
+x <- .ko$x
+x.ko <- .ko$ko
+
 if(DO.PERMUTE){
     y <- apply(y, 2, sample) %>% as.matrix
-    x <- x[sample(nrow(x)), , drop = FALSE]
 }
 
 .fqtl <- fqtl::fit.fqtl(y=y,
-                        x.mean = x,
+                        x.mean = cbind(x, x.ko),
                         factored = TRUE,
-                        k=min(ncol(y), ncol(x)),
+                        k=min(ncol(y), 2 * ncol(x)),
                         model = "nb",
                         options = opts)
 
 .snp.info <- .data$snp.info %>%
-    mutate(x.col = 1:n())
+    mutate(x.col = 1:n()) %>%
+    mutate(ko = 0)
+
+ptot <- nrow(.snp.info)
+
+.snp.info.ko <- .snp.info %>%
+    mutate(x.col = x.col + ptot) %>%
+    mutate(ko = 1)
+
+.snp.info <- rbind(.snp.info, .snp.info.ko)
 
 .gene.info <- .data$gene.info %>%
-    mutate(y.col = 1:n())
+    mutate(y.col = 1:n()) %>%
+    mutate(`#chr` = as.integer(`#chr`))
 
 .ensg <- unique(.gene.info$ensembl_gene_id)
 .hgnc <- unique(.gene.info$hgnc_symbol)
 
-.left.dt <- melt.fqtl.effect(.fqtl$mean.left) %>%
+.dt <- melt.fqtl.effect(.fqtl$mean.left) %>% 
+    dplyr::rename(x.col = .row, k.col = .col) %>%
+    (function(x) left_join(.snp.info, x)) %>%
+    as.data.table
+
+.dt[order(.dt$lodds, decreasing = TRUE),
+    efdr := pmin(cumsum(ko) / seq(1, .N), 1),
+    by = .(k.col)]
+
+.left.dt <- .dt %>%
     mutate(theta.sd = sqrt(theta.var)) %>% 
     dplyr::select(-theta.var) %>% 
-    dplyr::rename(x.col = .row, k.col = .col) %>%
-    (function(x) left_join(.snp.info, x)) %>% 
-    mutate(start = snp.loc - 1) %>% 
-    mutate(stop = snp.loc) %>% 
     dplyr::rename(`#chr` = `chr`) %>% 
+    mutate(`#chr` = as.integer(`#chr`)) %>% 
+    mutate(`start` = snp.loc - 1) %>% 
+    mutate(`stop` = snp.loc) %>% 
     mutate(ensembl_gene_id = .ensg, hgnc_symbol = .hgnc) %>% 
     arrange(`#chr`, `stop`, `k.col`) %>% 
+    dplyr::rename(k = `k.col`) %>% 
     dplyr::select(`#chr`, `start`, `stop`,
-                  starts_with("plink"), `k.col`,
-                  `ensembl_gene_id`, `hgnc_symbol`,
-                  theta, theta.sd, lodds) %>% 
+                  starts_with("plink"), `k`,
+                  `ensembl_gene_id`, `hgnc_symbol`, `ko`,
+                  theta, theta.sd, lodds, efdr) %>% 
     as.data.table
 
 .right.dt <- melt.fqtl.effect(.fqtl$mean.right) %>%
