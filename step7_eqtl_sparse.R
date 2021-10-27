@@ -36,7 +36,7 @@ if(all(file.exists(out.files))) {
 }
 
 ################################################################
-CIS.DIST <- 7e5 # cis distance
+CIS.DIST <- 5e5 # cis distance
 
 dir.create(dirname(OUT.HDR), recursive = TRUE, showWarnings = FALSE)
 TEMP.DIR <- TEMP.DIR %&% OUT.HDR
@@ -77,10 +77,10 @@ dir.create(TEMP.DIR, recursive = TRUE, showWarnings = FALSE)
 
 #' @param yy
 #' @param ncv
-build.cv.idx <- function(yy, ncv = NCV) {
+build.cv.idx <- function(yy, ncv) {
 
     ntot <- nrow(yy)
-    ntest <- ceiling(ntot/NCV)
+    ntest <- ceiling(ntot/ncv)
     rand.idx <- sample(ntot)
 
     .fun <- function(j) {
@@ -206,6 +206,13 @@ if(is.null(.data)) {
     q()
 }
 
+.maf <-
+    data.table(maf.1 = apply(.data$x, 2, mean),
+               maf.2 = apply(2 - .data$x, 2, mean)) %>%
+    mutate(maf = pmin(maf.1, maf.2)/2) %>%
+    mutate(x.col =1:n()) %>%
+    select(maf, x.col)
+
 svd.knockoff <- function(x){
     .svd <- zqtl::take.ld.svd(x, eigen.tol = 0, eigen.reg = 0)    
 
@@ -267,11 +274,52 @@ opts <- list(do.hyper = TRUE,
              decay = 0,
              tol = 1e-6)
 
+#######################
+## cross-validataion ##
+#######################
+
+.cv.set <- build.cv.idx(y, 5)
+cv.tab <- data.table()
+
+for(.cv in .cv.set) {
+
+    y.train <- y[.cv$train, , drop = FALSE]
+    x.train <- x[.cv$train, , drop = FALSE]
+    y.test <- y[.cv$test, , drop = FALSE]
+    x.test <- x[.cv$test, , drop = FALSE]
+
+    .train <- fqtl::fit.fqtl(y = y.train,
+                             x.mean = x.train,
+                             model = "nb",
+                             options = opts)
+
+    y.pred <- x.test %*% .train$mean$theta
+
+    rr <-
+        sapply(1:ncol(y.pred), function(j) {
+            cor(y.pred[,j], y.test[,j],
+                method = "spearman",
+                use = "pairwise.complete.obs")
+        })
+
+    cv.tab <- rbind(cv.tab, data.table(rr, y.col = 1:length(rr)))
+}
+
+cv.dt <- cv.tab[, .(r = mean(rr)), by = .(y.col)]
+
+###################
+## full training ##
+###################
+
 .fit <- fqtl::fit.fqtl(y = y,
                        x.mean = x,
                        c.mean = x.ko,
                        model = "nb",
                        options = opts)
+
+####################
+## output results ##
+####################
 
 .sparse.dt <- melt.fqtl.effect(.fit$mean) %>%
     rename(x.col = .row, y.col = .col) %>%
@@ -292,13 +340,6 @@ opts <- list(do.hyper = TRUE,
 .snp.info <- .data$snp.info %>%
     mutate(x.col = 1:n())
 
-.maf <-
-    data.table(maf.1 = apply(x, 2, mean),
-               maf.2 = apply(2 - x, 2, mean)) %>%
-    mutate(maf = pmin(maf.1, maf.2)/2) %>%
-    mutate(x.col =1:n()) %>%
-    select(maf, x.col)
-
 out.stat <-
     .stat %>%
     left_join(.snp.info) %>% 
@@ -307,10 +348,11 @@ out.stat <-
     mutate(start = snp.loc - 1) %>% 
     mutate(stop = snp.loc) %>% 
     left_join(.maf) %>% 
+    left_join(cv.dt) %>% 
     arrange(`#chr`, `stop`) %>% 
     select(`#chr`, `start`, `stop`, starts_with("plink"),
            ensembl_gene_id, hgnc_symbol, celltype,
-           beta, se, p.val, n, maf,
+           beta, se, p.val, n, maf, r,
            theta, theta.sd, lodds,
            theta.ko, theta.sd.ko, lodds.ko) %>% 
     as.data.table
