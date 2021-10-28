@@ -235,6 +235,12 @@ y <- .data$y
 x <- .ko$x
 x.ko <- .ko$ko
 
+if(max(apply(y, 2, sd, na.rm=TRUE), na.rm=TRUE) < 1e-4) {
+    write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
+    log.msg("nothing to do")
+    q()
+}
+
 if(DO.PERMUTE){
     y <- apply(y, 2, sample)
 }

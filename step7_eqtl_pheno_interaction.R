@@ -211,7 +211,7 @@ read.gene.data <- function(g,
 
     ## convert back to pseudo-counting data
     yy <- scale(yy) %>% exp() %>% as.matrix
-    yy[, n.valid < 10] <- 0
+    yy[, n.valid < 10] <- NA
 
     list(x = xx,
          y = yy,
@@ -264,7 +264,7 @@ svd.knockoff <- function(x){
     list(x = xx, ko = xx.ko)
 }
 
-if(max(apply(y, 2, sd, na.rm=TRUE)) < 1e-4) {
+if(max(apply(y, 2, sd, na.rm=TRUE), na.rm=TRUE) < 1e-4) {
     write_tsv(data.frame(), OUT.HDR %&% "_stat.bed.gz")
     write_tsv(data.frame(), OUT.HDR %&% "_pheno.bed.gz")
     log.msg("Too small variance")
