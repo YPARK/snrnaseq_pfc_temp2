@@ -6,6 +6,7 @@ date: "`r Sys.Date()`"
 ```{r include=FALSE}
 library(tidyverse)
 library(data.table)
+library(patchwork)
 source("Util-rmd.R")
 source("../Util.R")
 
@@ -19,9 +20,9 @@ options(stringsAsFactors = FALSE)
 FIG.CAP = '**Fig.**'
 ```
 
+### Visualize cell-type-specific marker genes
 
 ```{r}
-
 .markers <-
     fread("../result/step3/bbknn.marker_names.gz", header = FALSE) %>%
     unlist
@@ -64,8 +65,15 @@ read.pb.dt <- function(.ct) {
                "OPC", "Oligo", "Microglia", "Astro",
                "Endo", "Per", "Fib", "SMC")
 
-pb.data <- lapply(.ct.order, read.pb.dt) %>%
-    do.call(what = rbind)
+.file <- ".result_celltype_markers.RDS"
+
+if(!file.exists(.file)) {
+    pb.data <- lapply(.ct.order, read.pb.dt) %>%
+        do.call(what = rbind)
+    saveRDS(pb.data, file = .file)
+} else {
+    pb.data <- readRDS(.file)
+}
 
 .col.dt <- data.table(celltype = .ct.order) %>%
     left_join(fread("../data/brain_colors.txt"))
@@ -74,10 +82,7 @@ pb.data[, celltype := factor(ct, .col.dt$celltype, .col.dt$ct.name)]
 ```
 
 
-
-
 ```{r}
-
 pb.sum <- pb.data[, .(x = mean(log2(.5 + value))),
                   by = .(hgnc, ct)]
 
@@ -114,10 +119,8 @@ pb.sum[, x := scale(`x`), by = .(hgnc)]
 ```
 
 ```{r fig.width=12, fig.height=6}
-
-.cutoff <- quantile(sqrt(.dt$value), .99)
-
-.aes <- aes(y = row, x = col, fill = pmin(sqrt(value), .cutoff))
+.trunc <- quantile(sqrt(.dt$value), .99)
+.aes <- aes(y = row, x = col, fill = pmin(sqrt(value), .trunc))
 
 plt <-
     .gg.plot(.dt, .aes) +
@@ -161,3 +164,114 @@ print(plt)
 ```
 
 
+### Latent representation of cell-type-stratified pseudobulk data
+
+
+```{r}
+read.pb.dt <- function(.ct) {
+
+    .col.names <- ("../result/step5/pseudobulk/" %&% .ct %&% ".mu_cols.gz") %>%
+        fread(header=FALSE, col.names = "col") %>%
+        unlist
+
+    .row.names <- ("../result/step5/filtered/" %&% .ct %&% ".rows.gz") %>%
+        fread(header=FALSE, col.names = "row") %>%
+        unlist
+
+    .ret <- ("../result/step5/pseudobulk/" %&% .ct %&% ".mu.gz") %>%
+        fread(header=FALSE, col.names = .col.names) %>%
+        mutate(row = .row.names) %>%
+        as.data.table %>%
+        melt(id.vars = "row") %>% 
+        as.data.table
+
+    log.msg(.ct)
+
+    return(.ret)
+}
+
+.ct.order <- c("Ex-L2or3", "Ex-L4", "Ex-L5or6", "Ex-L5or6-CC",
+               "In-PV", "In-SST", "In-SV2C", "In-VIP",
+               "OPC", "Oligo", "Microglia", "Astro",
+               "Endo", "Per", "Fib", "SMC")
+
+.col.dt <- data.table(celltype = .ct.order) %>%
+    left_join(fread("../data/brain_colors.txt"))
+
+.file <- ".result_celltype_embedding.RDS"
+
+if(!file.exists(.file)) {
+
+    pb.data <- lapply(.ct.order, read.pb.dt) %>%
+        do.call(what = rbind)
+
+    pb.mat <- dcast(pb.data, row ~ variable,
+                    fun.aggregate = mean,
+                    value.var = "value",
+                    fill = 0)
+
+    .mat <- pb.mat %>%
+        select(-`row`) %>%
+        as.matrix %>%
+        t()
+
+    .svd <- rsvd::rsvd(.mat, k = 100)
+
+    .annot.dt <- data.table(sample = rownames(.mat)) %>%
+        separate(`sample`, c("projid", "celltype"), sep="[_]") 
+
+
+    .tsne <- Rtsne::Rtsne(.svd$u,
+                          dims = 2,
+                          check_duplicates = FALSE,
+                          pca = FALSE, # already done
+                          verbose = TRUE,
+                          num_threads = 15)
+
+    .umap <- uwot::umap(.svd$u,
+                        fast_sgd = TRUE,
+                        verbose = TRUE,
+                        n_threads = 30,
+                        spread = 5)
+
+
+    embedding.dt <- cbind(data.table(tsne=.tsne$Y),
+                          data.table(umap=.umap),
+                          .annot.dt)
+
+    embedding.dt[, celltype := factor(celltype, .col.dt$celltype, .col.dt$ct.name)]
+
+    saveRDS(embedding.dt, file = .file)
+
+} else {
+    embedding.dt <- readRDS(.file)
+}
+```
+
+```{r fig_expr_embedding, fig.width=8, fig.height=4}
+mid.dt <- embedding.dt[, .(umap.V1 = median(umap.V1),
+                           umap.V2 = median(umap.V2),
+                           tsne.V1 = median(tsne.V1),
+                           tsne.V2 = median(tsne.V2)),
+                       by = .(celltype)] %>%
+    mutate(lab = str_replace_all(celltype, " ", "\n"))
+
+p1 <-
+    .gg.plot(embedding.dt, aes(x = tsne.V1, y = tsne.V2, fill = celltype)) +
+    geom_point(stroke = 0, pch = 21, size = 1) + xlab("tSNE 1") + ylab("tSNE 2") +
+    geom_text_repel(data = mid.dt, aes(label = lab), size = 2.5) +
+    scale_fill_manual(values = .col.dt$hex) +
+    theme(legend.position = "none")
+
+p2 <-
+    .gg.plot(embedding.dt, aes(x = umap.V1, y = umap.V2, fill = celltype)) +
+    geom_point(stroke = 0, pch = 21, size = 1) + xlab("UMAP 1") + ylab("UMAP 2") +
+    geom_text_repel(data = mid.dt, aes(label = lab), size = 2.5) +
+    scale_fill_manual(values = .col.dt$hex) +
+    theme(legend.position = "none")
+
+plt <- p1 | p2
+print(plt)
+.file <- fig.dir %&% "/Fig_expr_embedding.pdf"
+.gg.save(file = .file, plot = plt, width = 8, height = 4)
+```
