@@ -27,32 +27,6 @@ if(file.exists(OUT.FILE)) {
     q()
 }
 
-#' @param .svd
-#' @param max.K
-run.varimax <- function(.svd, max.K) {
-
-    V <- t(.svd$V.t)
-
-    max.K <- min(ncol(V), max.K)
-
-    if(max.K < 1) return(NULL)
-
-    if(max.K < 2) {
-        .svd$V <- t(.svd$V.t)
-        return(.svd)
-    }
-
-    dd <- .svd$D[1:max.K, , drop = FALSE]
-    V <- V[, 1:max.K, drop = FALSE]
-    .vm <- varimax(V, eps = 1e-4, normalize=FALSE)
-
-    R <- .vm$rotmat
-    U <- .svd$U[, 1:max.K, drop = FALSE] %*% R
-    V <- V %*% R
-
-    list(U = U, D = dd, V = V, V.t = t(V))
-}
-
 .bed.write <- function(out.dt, out.file) {
     out.tsv.file <- str_remove(out.file, ".gz$")
     fwrite(out.dt,
@@ -78,7 +52,17 @@ ld.tab <- fread(LD.FILE) %>%
     mutate(ld = 1:n()) %>%
     as.data.frame
 
-fit.pgs.ld <- function(ld.idx, pv.cutoff) {
+svd.knockoff <- function(.svd){
+    uu <- .svd$U
+    .offset <- sample(ncol(uu), 1)
+    .col <- seq(.offset, ncol(uu) + .offset - 1) %% ncol(uu) + 1
+    uu.ko <- uu[, .col, drop = FALSE]
+    ret <- .svd
+    ret$U <- uu.ko
+    return(ret)
+}
+
+fit.pgs.ld <- function(ld.idx) {
 
     log.msg("\n\nFitting LD %d\n\n", ld.idx)
 
@@ -136,14 +120,17 @@ fit.pgs.ld <- function(ld.idx, pv.cutoff) {
         select(z) %>%
         as.matrix()
 
-    .svd <- zqtl::take.ld.svd(X, eigen.tol = .01, eigen.reg = 0) %>%
-        run.varimax(max.K = 300)
-
+    .svd <- zqtl::take.ld.svd(X, eigen.tol = .01, eigen.reg = 0)
     zz <- zqtl::scale.zscore(zz, .svd$V.t, .svd$D)
 
     if(is.null(.svd)) return(data.table())
 
-    y.tot <- pred.prs(.svd, zz, 0.01) %>% as.numeric
+    .svd.ko <- svd.knockoff(.svd)
+
+    y.obs <- pred.prs(.svd, zz, 0.01) %>% as.numeric
+    y.ko <- pred.prs(.svd.ko, zz, 0.01) %>% as.numeric
+
+
 
     uu <- .svd$U
 
