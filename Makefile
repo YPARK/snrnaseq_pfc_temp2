@@ -385,8 +385,16 @@ jobs/step7/eqtl_fqtl.jobs.gz:
 
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=2g -l h_rt=0:30:00 -b y -j y -N STEP7 -t 1-$$(zless $@ | wc -l) ./run_jobs.sh $@
 
-jobs/step7/%.long.gz: jobs/step7/%.jobs.gz
+jobs/step7/%sparse.long.gz: jobs/step7/%sparse.jobs.gz
 	gzip -cd $< | awk 'system("! [ -f " $$NF "_stat.bed.gz ] && ! [ -f " $$(NF-1) "_stat.bed.gz ] ") == 0' | gzip > $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=16g -l h_rt=24:00:00 -b y -j y -N STEP7_EQTL_LONG -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
+
+jobs/step7/%interaction.long.gz: jobs/step7/%interaction.jobs.gz
+	gzip -cd $< | awk 'system("! [ -f " $$NF "_stat.bed.gz ] && ! [ -f " $$NF "_pheno.bed.gz ] ") == 0' | gzip > $@
+	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=16g -l h_rt=24:00:00 -b y -j y -N STEP7_EQTL_LONG -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
+
+jobs/step7/%fqtl.long.gz: jobs/step7/%fqtl.jobs.gz
+	gzip -cd $< | awk 'system("! [ -f " $$NF "_stat.bed.gz ] && ! [ -f " $$NF "_celltype.bed.gz ] ") == 0' | gzip > $@
 	[ $$(zless $@ | wc -l) -eq 0 ] || qsub -P compbio_lab -o /dev/null -binding linear:1 -cwd -V -l h_vmem=16g -l h_rt=24:00:00 -b y -j y -N STEP7_EQTL_LONG -t 1-$$(zcat $@ | wc -l) ./run_jobs.sh $@
 
 #########################

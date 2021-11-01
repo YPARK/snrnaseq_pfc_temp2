@@ -351,8 +351,8 @@ out.stat <-
     left_join(.snp.info) %>% 
     left_join(.gene.info) %>% 
     left_join(.sparse.dt) %>% 
-    mutate(start = snp.loc - 1) %>% 
-    mutate(stop = snp.loc) %>% 
+    mutate(`start` = as.integer(snp.loc - 1)) %>% 
+    mutate(`stop` = as.integer(snp.loc)) %>% 
     left_join(.maf) %>% 
     left_join(cv.dt) %>% 
     arrange(`#chr`, `stop`) %>% 

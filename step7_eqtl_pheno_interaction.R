@@ -336,8 +336,8 @@ ptot <- nrow(.snp.info)
     dplyr::rename(`#chr` = `chr`) %>% 
     mutate(`#chr` = as.integer(`#chr`)) %>% 
     left_join(.pheno.info) %>%
-    mutate(start = snp.loc - 1) %>% 
-    mutate(stop = snp.loc) %>% 
+    mutate(`start` = as.integer(snp.loc - 1)) %>% 
+    mutate(`stop` = as.integer(snp.loc)) %>% 
     arrange(`#chr`, `stop`, `pheno`) %>% 
     mutate(ensembl_gene_id = .ensg, hgnc_symbol = .hgnc) %>% 
     dplyr::select(`#chr`, `start`, `stop`,
@@ -353,6 +353,8 @@ ptot <- nrow(.snp.info)
     (function(x) left_join(.gene.info, x)) %>%
     left_join(.pheno.info) %>%
     dplyr::select(-ends_with(".col")) %>% 
+    mutate(`transcript_start` = as.integer(transcript_start)) %>% 
+    mutate(`transcript_stop` = as.integer(transcript_end)) %>% 
     as.data.table
 
 .bed.write(.left.dt, OUT.HDR %&% "_stat.bed.gz")
